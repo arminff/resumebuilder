@@ -4,4 +4,5 @@ node_modules/
 tmp/
 dist/
 coverage/
-
+get-token.js
+.pdf
