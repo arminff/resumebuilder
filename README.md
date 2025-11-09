@@ -9,6 +9,7 @@ AI-powered resume backend that:
 ### Stack
 - Node.js, Express.js
 - Supabase (Auth + PostgreSQL)
+- Stripe (Subscriptions & Payments)
 - OpenRouter (AI content)
 - Puppeteer (HTML → PDF)
 - Axios + Cheerio (static scraping), Puppeteer (dynamic scraping)
@@ -49,16 +50,30 @@ You can generate a token with your frontend Supabase client or a small script (s
 ---
 
 ## Environment Variables
+
+### Required
 - `SUPABASE_URL` – your Supabase project URL
 - `SUPABASE_ANON_KEY` – Supabase anon key
+- `SUPABASE_SERVICE_ROLE_KEY` – Supabase service role key (for subscriptions)
 - `OPENROUTER_API_KEY` – OpenRouter API key
-- `OPENROUTER_MODEL` – optional (default: `openai/gpt-4o`)
-- `PORT` – optional (default: `4000`)
+- `STRIPE_SECRET_KEY` – Stripe secret API key
+- `STRIPE_WEBHOOK_SECRET` – Stripe webhook signing secret
+
+### Optional
+- `OPENROUTER_MODEL` – AI model (default: `openai/gpt-4o`)
+- `STRIPE_PRICE_ID_BASIC` – Stripe price ID for basic plan
+- `STRIPE_PRICE_ID_PRO` – Stripe price ID for pro plan
+- `STRIPE_SUCCESS_URL` – Success redirect URL for checkout
+- `STRIPE_CANCEL_URL` – Cancel redirect URL for checkout
+- `FRONTEND_URL` – Frontend URL for redirects
+- `PORT` – Server port (default: `4000`)
+- `PUPPETEER_EXECUTABLE_PATH` – Custom Chromium path
 
 ---
 
 ## Endpoints
 
+### Resume & Scraping
 - `GET /api/health` – health check (no auth)
 - `POST /api/scrape/static` – scrape static page
   - body: `{ "url": "https://..." }`
@@ -70,6 +85,15 @@ You can generate a token with your frontend Supabase client or a small script (s
   - body: `{ html }`
 - `POST /api/resume/build` – end-to-end: scrape (optional) + AI + PDF
   - body: `{ jobUrl? | jobDescription?, userProfile, template?, model? }`
+
+### Subscriptions
+- `GET /api/subscription/plans` – get available subscription plans
+- `GET /api/subscription/status` – get current user's subscription status
+- `POST /api/subscription/checkout` – create Stripe checkout session
+  - body: `{ "planId": "basic" | "pro" }`
+- `POST /api/subscription/portal` – create Stripe customer portal session
+  - body: `{ "returnUrl"?: "https://..." }`
+- `POST /api/subscription/webhook` – Stripe webhook endpoint (no auth, verified via signature)
 
 Notes:
 - Either `jobUrl` or `jobDescription` is required.
@@ -172,6 +196,35 @@ OpenRouter errors:
 Scraping returns little content:
 - Use `dynamic` endpoint or pass `jobDescription` directly
 - Some sites obfuscate content; try another URL
+
+---
+
+## Subscriptions
+
+This backend includes Stripe subscription integration. See [STRIPE_SETUP.md](./STRIPE_SETUP.md) for complete setup instructions.
+
+### Quick Setup
+
+1. **Create Stripe products and prices** in Stripe Dashboard
+2. **Set up webhook endpoint** in Stripe Dashboard
+3. **Create database table** in Supabase (see `DATABASE_SCHEMA.md`)
+4. **Configure environment variables** (see above)
+
+### Subscription Plans
+
+- **Free**: 5 resumes/month, basic templates
+- **Basic**: 50 resumes/month, all templates, priority support
+- **Pro**: Unlimited resumes, all templates, priority support, custom branding
+
+### Flow
+
+1. User selects plan → Frontend calls `/api/subscription/checkout`
+2. Backend creates Stripe Checkout Session → Returns checkout URL
+3. User completes payment on Stripe → Stripe sends webhook
+4. Backend processes webhook → Updates Supabase database
+5. User subscription status synced → Frontend queries `/api/subscription/status`
+
+See [STRIPE_SETUP.md](./STRIPE_SETUP.md) for detailed documentation.
 
 ---
 

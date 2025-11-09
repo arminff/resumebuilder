@@ -35,4 +35,11 @@ export const pdfSchema = z.object({
 
 export const scrapeSchema = z.object({ url: z.string().url() });
 
+// Subscription schemas
+export const createCheckoutSchema = z.object({
+  planId: z.enum(['basic', 'pro']), // Free plan doesn't need checkout
+});
 
+export const portalSessionSchema = z.object({
+  returnUrl: z.string().url().optional(),
+});
