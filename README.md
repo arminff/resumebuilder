@@ -16,6 +16,9 @@ AI-powered resume backend that:
 
 ---
 
+Request → Server → Auth → Routes → Utils → AI → Templates → PDF → Response
+
+
 ## Quick Start
 
 1) Configure environment

@@ -26,21 +26,30 @@ function modernTemplate(name, content, safe) {
   <title>Resume - ${name}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    @page { margin: 0.75in; size: letter; }
+    @page { 
+      margin-top: 0.4in;
+      margin-bottom: 0.5in;
+      margin-left: 0.75in;
+      margin-right: 0.75in;
+      size: letter; 
+    }
     body {
       font-family: 'Times New Roman', Times, serif;
       font-size: 11pt;
       line-height: 1.4;
       color: #000;
       background: #fff;
+      margin: 0;
+      padding: 0;
     }
     
     /* Header - Simple and clean */
     .header {
       text-align: center;
-      margin-bottom: 20pt;
+      margin-bottom: 12pt;
+      margin-top: 0;
       border-bottom: 2pt solid #000;
-      padding-bottom: 10pt;
+      padding-bottom: 8pt;
     }
     .header h1 {
       font-size: 18pt;
@@ -223,18 +232,27 @@ function classicTemplate(name, content, safe) {
   <title>Resume - ${name}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    @page {
+      margin-top: 0.4in;
+      margin-bottom: 0.5in;
+      margin-left: 0.75in;
+      margin-right: 0.75in;
+      size: letter;
+    }
     body {
       font-family: 'Times New Roman', serif;
       line-height: 1.6;
       color: #000;
-      padding: 50px;
+      padding: 0;
+      margin: 0;
       font-size: 12px;
     }
     .header {
       text-align: center;
       border-bottom: 2px solid #000;
-      padding-bottom: 15px;
-      margin-bottom: 25px;
+      padding-bottom: 12px;
+      margin-bottom: 15px;
+      margin-top: 0;
     }
     .header h1 {
       font-size: 24px;
@@ -351,22 +369,31 @@ function minimalTemplate(name, content, safe) {
   <title>Resume - ${name}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    @page {
+      margin-top: 0.4in;
+      margin-bottom: 0.5in;
+      margin-left: 0.75in;
+      margin-right: 0.75in;
+      size: letter;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       line-height: 1.8;
       color: #2d3748;
-      padding: 60px 50px;
+      padding: 0;
+      margin: 0;
       font-size: 11px;
       background: #fafafa;
     }
     .container {
       background: white;
-      padding: 50px;
+      padding: 30px 50px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     .header {
-      margin-bottom: 30px;
-      padding-bottom: 20px;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      margin-top: 0;
       border-bottom: 1px solid #e2e8f0;
     }
     .header h1 {

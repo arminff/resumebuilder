@@ -1,11 +1,29 @@
 import puppeteer from 'puppeteer';
+import { execSync } from 'child_process';
 
 export async function htmlToPdfBuffer(htmlString) {
   const launchOptions = {
     headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu'
+    ]
   };
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+  
+  // Use system Chromium if available, otherwise use bundled Chrome
+  if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
+    try {
+      const chromiumPath = execSync('which chromium-browser || which chromium', { encoding: 'utf8' }).trim();
+      if (chromiumPath) {
+        launchOptions.executablePath = chromiumPath;
+        console.log('✅ Using system Chromium:', chromiumPath);
+      }
+    } catch (e) {
+      console.log('⚠️ System Chromium not found, using bundled Chrome');
+    }
+  } else {
     launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
   }
 

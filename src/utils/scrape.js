@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import puppeteer from 'puppeteer';
+import { execSync } from 'child_process';
 
 // Smart job description extractor
 function extractJobDescription($) {
@@ -72,10 +73,32 @@ export async function scrapeStatic(url) {
 }
 
 export async function scrapeDynamic(url) {
-  const browser = await puppeteer.launch({ 
+  const launchOptions = { 
     headless: 'new', 
-    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
-  });
+    args: [
+      '--no-sandbox', 
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled'
+    ] 
+  };
+  
+  // Use system Chromium if available
+  if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
+    try {
+      const chromiumPath = execSync('which chromium-browser || which chromium', { encoding: 'utf8' }).trim();
+      if (chromiumPath) {
+        launchOptions.executablePath = chromiumPath;
+        console.log('✅ Using system Chromium for scraping:', chromiumPath);
+      }
+    } catch (e) {
+      console.log('⚠️ System Chromium not found, using bundled Chrome');
+    }
+  } else {
+    launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  
+  const browser = await puppeteer.launch(launchOptions);
   try {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
