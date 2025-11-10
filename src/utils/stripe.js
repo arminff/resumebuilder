@@ -25,7 +25,7 @@ export const SUBSCRIPTION_PLANS = {
   },
   basic: {
     name: 'Basic',
-    priceId: process.env.STRIPE_PRICE_ID_BASIC || 'price_basic_monthly',
+    priceId: process.env.STRIPE_PRICE_ID_BASIC,
     features: ['50 resumes per month', 'All templates', 'Priority support'],
     limits: {
       resumesPerMonth: 50
