@@ -5,4 +5,8 @@ tmp/
 dist/
 coverage/
 get-token.js
-.pdf
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif

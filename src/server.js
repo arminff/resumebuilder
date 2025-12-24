@@ -4,11 +4,16 @@ import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 import { authMiddleware } from './utils/auth.js';
 import { resumeRouter } from './routes/resume.js';
 import { scrapeRouter } from './routes/scrape.js';
 import { subscriptionRouter } from './routes/subscription.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 
@@ -56,43 +61,90 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
+        
+        // Enhanced logging for debugging
+        console.log('🔍 Checkout session data:', {
+          id: session.id,
+          client_reference_id: session.client_reference_id,
+          customer: session.customer,
+          subscription: session.subscription,
+          metadata: session.metadata,
+          mode: session.mode,
+          payment_status: session.payment_status
+        });
+        
         const userId = session.client_reference_id || session.metadata?.userId;
         const customerId = session.customer;
 
-        if (!userId || !customerId) {
-          console.error('❌ Missing userId or customerId in checkout session');
-          break;
+        if (!userId) {
+          console.error('❌ Missing userId in checkout session');
+          console.error('Session data:', JSON.stringify(session, null, 2));
+          // Still return 200 to acknowledge receipt, but log the error
+          return res.json({ received: true, error: 'Missing userId' });
+        }
+
+        if (!customerId) {
+          console.error('❌ Missing customerId in checkout session');
+          console.error('Session data:', JSON.stringify(session, null, 2));
+          // Still return 200 to acknowledge receipt
+          return res.json({ received: true, error: 'Missing customerId' });
         }
 
         // Get subscription details from Stripe
         const subscriptionId = session.subscription;
-        if (subscriptionId) {
-          const { subscription: stripeSub, error: subError } = await getStripeSubscription(subscriptionId);
-          
-          if (subError || !stripeSub) {
-            console.error('❌ Error fetching subscription from Stripe:', subError);
-            break;
-          }
-
-          // Update subscription in database
-          const subscriptionData = {
-            user_id: userId,
-            stripe_customer_id: customerId,
-            stripe_subscription_id: subscriptionId,
-            status: stripeSub.status,
-            plan_id: session.metadata?.planId || 'basic',
-            current_period_start: new Date(stripeSub.current_period_start * 1000).toISOString(),
-            current_period_end: new Date(stripeSub.current_period_end * 1000).toISOString(),
-            cancel_at_period_end: stripeSub.cancel_at_period_end,
-          };
-
-          const { error: upsertError } = await upsertSubscription(subscriptionData);
-          if (upsertError) {
-            console.error('❌ Error upserting subscription:', upsertError);
-          } else {
-            console.log(`✅ Subscription created/updated for user: ${userId}`);
-          }
+        
+        if (!subscriptionId) {
+          console.error('❌ Missing subscription ID in checkout session');
+          console.error('Session data:', JSON.stringify(session, null, 2));
+          // Still return 200 to acknowledge receipt
+          return res.json({ received: true, error: 'Missing subscription ID' });
         }
+
+        console.log(`🔍 Fetching subscription ${subscriptionId} from Stripe...`);
+        const { subscription: stripeSub, error: subError } = await getStripeSubscription(subscriptionId);
+        
+        if (subError || !stripeSub) {
+          console.error('❌ Error fetching subscription from Stripe:', subError);
+          // Still return 200 to acknowledge receipt
+          return res.json({ received: true, error: 'Failed to fetch subscription from Stripe' });
+        }
+
+        console.log('✅ Subscription fetched from Stripe:', {
+          id: stripeSub.id,
+          status: stripeSub.status,
+          current_period_start: stripeSub.current_period_start,
+          current_period_end: stripeSub.current_period_end
+        });
+
+        // Determine plan_id from metadata or default to basic
+        const planId = session.metadata?.planId || 'basic';
+        console.log(`📦 Plan ID: ${planId}`);
+
+        // Update subscription in database
+        const subscriptionData = {
+          user_id: userId,
+          stripe_customer_id: customerId,
+          stripe_subscription_id: subscriptionId,
+          status: stripeSub.status,
+          plan_id: planId,
+          current_period_start: new Date(stripeSub.current_period_start * 1000).toISOString(),
+          current_period_end: new Date(stripeSub.current_period_end * 1000).toISOString(),
+          cancel_at_period_end: stripeSub.cancel_at_period_end || false,
+        };
+
+        console.log('💾 Upserting subscription to database:', subscriptionData);
+        const { data: upsertedData, error: upsertError } = await upsertSubscription(subscriptionData);
+        
+        if (upsertError) {
+          console.error('❌ Error upserting subscription:', upsertError);
+          console.error('Subscription data attempted:', subscriptionData);
+          // Still return 200 to acknowledge receipt (Stripe will retry if needed)
+          // But log the error for debugging
+          return res.json({ received: true, error: 'Failed to save subscription to database' });
+        }
+
+        console.log(`✅ Subscription created/updated for user: ${userId}, plan: ${planId}, status: ${stripeSub.status}`);
+        console.log('📊 Upserted subscription:', upsertedData);
         break;
       }
 
@@ -101,24 +153,57 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         const stripeSubscription = event.data.object;
         const customerId = stripeSubscription.customer;
 
-        // Find user by customer ID
-        const { customer, error: custError } = await getStripeCustomer(customerId);
-        if (custError || !customer) {
-          console.error('❌ Error fetching customer:', custError);
+        if (!customerId) {
+          console.error('❌ Missing customer ID in subscription event');
           break;
         }
 
-        // Get user subscription by customer ID
-        if (!supabaseAdmin) break;
+        // Get user subscription by customer ID directly (more reliable)
+        if (!supabaseAdmin) {
+          console.error('❌ Supabase admin not configured');
+          break;
+        }
 
+        console.log(`🔍 Looking up subscription by customer ID: ${customerId}`);
         const { data: subscription, error: subError } = await supabaseAdmin
           .from('subscriptions')
-          .select('user_id')
+          .select('user_id, plan_id')
           .eq('stripe_customer_id', customerId)
           .single();
 
         if (subError || !subscription) {
-          console.error('❌ Subscription not found in database');
+          console.error('❌ Subscription not found in database for customer:', customerId);
+          console.error('Error:', subError);
+          // Try to find by subscription ID as fallback
+          const { data: subBySubId } = await supabaseAdmin
+            .from('subscriptions')
+            .select('user_id, plan_id')
+            .eq('stripe_subscription_id', stripeSubscription.id)
+            .single();
+          
+          if (!subBySubId) {
+            console.error('❌ Subscription not found by subscription ID either');
+            break;
+          }
+          
+          // Use the found subscription
+          const subscriptionData = {
+            user_id: subBySubId.user_id,
+            stripe_customer_id: customerId,
+            stripe_subscription_id: stripeSubscription.id,
+            status: event.type === 'customer.subscription.deleted' ? 'canceled' : stripeSubscription.status,
+            plan_id: subBySubId.plan_id || 'basic',
+            current_period_start: new Date(stripeSubscription.current_period_start * 1000).toISOString(),
+            current_period_end: new Date(stripeSubscription.current_period_end * 1000).toISOString(),
+            cancel_at_period_end: stripeSubscription.cancel_at_period_end || false,
+          };
+
+          const { error: upsertError } = await upsertSubscription(subscriptionData);
+          if (upsertError) {
+            console.error('❌ Error updating subscription:', upsertError);
+          } else {
+            console.log(`✅ Subscription ${event.type} for user: ${subBySubId.user_id}`);
+          }
           break;
         }
 
@@ -126,21 +211,19 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
           user_id: subscription.user_id,
           stripe_customer_id: customerId,
           stripe_subscription_id: stripeSubscription.id,
-          status: stripeSubscription.status,
+          status: event.type === 'customer.subscription.deleted' ? 'canceled' : stripeSubscription.status,
+          plan_id: subscription.plan_id || 'basic', // Preserve existing plan_id
           current_period_start: new Date(stripeSubscription.current_period_start * 1000).toISOString(),
           current_period_end: new Date(stripeSubscription.current_period_end * 1000).toISOString(),
-          cancel_at_period_end: stripeSubscription.cancel_at_period_end,
+          cancel_at_period_end: stripeSubscription.cancel_at_period_end || false,
         };
 
-        if (event.type === 'customer.subscription.deleted') {
-          subscriptionData.status = 'canceled';
-        }
-
+        console.log(`💾 Updating subscription for user: ${subscription.user_id}`);
         const { error: upsertError } = await upsertSubscription(subscriptionData);
         if (upsertError) {
           console.error('❌ Error updating subscription:', upsertError);
         } else {
-          console.log(`✅ Subscription ${event.type} for user: ${subscription.user_id}`);
+          console.log(`✅ Subscription ${event.type} for user: ${subscription.user_id}, status: ${subscriptionData.status}`);
         }
         break;
       }
@@ -150,37 +233,51 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         const customerId = invoice.customer;
         const subscriptionId = invoice.subscription;
 
-        if (subscriptionId) {
-          const { subscription: stripeSub, error: subError } = await getStripeSubscription(subscriptionId);
-          if (subError || !stripeSub) break;
+        if (!subscriptionId) {
+          console.log('ℹ️  Invoice paid but no subscription ID');
+          break;
+        }
 
-          // Get user subscription by customer ID
-          if (!supabaseAdmin) break;
+        console.log(`🔍 Processing invoice.paid for subscription: ${subscriptionId}`);
+        const { subscription: stripeSub, error: subError } = await getStripeSubscription(subscriptionId);
+        if (subError || !stripeSub) {
+          console.error('❌ Error fetching subscription for invoice:', subError);
+          break;
+        }
 
-          const { data: subscription, error: subError2 } = await supabaseAdmin
-            .from('subscriptions')
-            .select('user_id')
-            .eq('stripe_customer_id', customerId)
-            .single();
+        // Get user subscription by customer ID
+        if (!supabaseAdmin) {
+          console.error('❌ Supabase admin not configured');
+          break;
+        }
 
-          if (subError2 || !subscription) break;
+        const { data: subscription, error: subError2 } = await supabaseAdmin
+          .from('subscriptions')
+          .select('user_id, plan_id')
+          .eq('stripe_customer_id', customerId)
+          .single();
 
-          const subscriptionData = {
-            user_id: subscription.user_id,
-            stripe_customer_id: customerId,
-            stripe_subscription_id: subscriptionId,
-            status: stripeSub.status,
-            current_period_start: new Date(stripeSub.current_period_start * 1000).toISOString(),
-            current_period_end: new Date(stripeSub.current_period_end * 1000).toISOString(),
-            cancel_at_period_end: stripeSub.cancel_at_period_end,
-          };
+        if (subError2 || !subscription) {
+          console.error('❌ Subscription not found for invoice customer:', customerId);
+          break;
+        }
 
-          const { error: upsertError } = await upsertSubscription(subscriptionData);
-          if (upsertError) {
-            console.error('❌ Error updating subscription on invoice paid:', upsertError);
-          } else {
-            console.log(`✅ Subscription renewed for user: ${subscription.user_id}`);
-          }
+        const subscriptionData = {
+          user_id: subscription.user_id,
+          stripe_customer_id: customerId,
+          stripe_subscription_id: subscriptionId,
+          status: stripeSub.status,
+          plan_id: subscription.plan_id || 'basic', // Preserve existing plan_id
+          current_period_start: new Date(stripeSub.current_period_start * 1000).toISOString(),
+          current_period_end: new Date(stripeSub.current_period_end * 1000).toISOString(),
+          cancel_at_period_end: stripeSub.cancel_at_period_end || false,
+        };
+
+        const { error: upsertError } = await upsertSubscription(subscriptionData);
+        if (upsertError) {
+          console.error('❌ Error updating subscription on invoice paid:', upsertError);
+        } else {
+          console.log(`✅ Subscription renewed for user: ${subscription.user_id}, status: ${stripeSub.status}`);
         }
         break;
       }
@@ -193,7 +290,10 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
     return res.json({ received: true });
   } catch (err) {
     console.error('❌ Webhook processing error:', err);
-    return res.status(400).json({ error: 'Webhook processing failed' });
+    console.error('Error stack:', err.stack);
+    // Always return 200 to acknowledge receipt (even on errors)
+    // Stripe will retry if needed, but we don't want to keep failing
+    return res.json({ received: true, error: 'Webhook processing failed' });
   }
 });
 

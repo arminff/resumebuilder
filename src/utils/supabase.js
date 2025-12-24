@@ -46,8 +46,33 @@ export async function getUserSubscription(userId) {
 // Update or create subscription record
 export async function upsertSubscription(subscriptionData) {
   if (!supabaseAdmin) {
-    return { error: new Error('Supabase admin not configured') };
+    console.error('❌ Supabase admin client not available');
+    return { data: null, error: new Error('Supabase admin not configured') };
   }
+
+  // Validate required fields
+  if (!subscriptionData.user_id) {
+    console.error('❌ Missing user_id in subscription data');
+    return { data: null, error: new Error('Missing user_id') };
+  }
+
+  if (!subscriptionData.stripe_customer_id) {
+    console.error('❌ Missing stripe_customer_id in subscription data');
+    return { data: null, error: new Error('Missing stripe_customer_id') };
+  }
+
+  if (!subscriptionData.stripe_subscription_id) {
+    console.error('❌ Missing stripe_subscription_id in subscription data');
+    return { data: null, error: new Error('Missing stripe_subscription_id') };
+  }
+
+  console.log('💾 Attempting to upsert subscription:', {
+    user_id: subscriptionData.user_id,
+    plan_id: subscriptionData.plan_id,
+    status: subscriptionData.status,
+    stripe_customer_id: subscriptionData.stripe_customer_id,
+    stripe_subscription_id: subscriptionData.stripe_subscription_id
+  });
 
   try {
     const { data, error } = await supabaseAdmin
@@ -59,13 +84,32 @@ export async function upsertSubscription(subscriptionData) {
       .single();
 
     if (error) {
-      console.error('❌ Error upserting subscription:', error);
+      console.error('❌ Supabase upsert error:', error);
+      console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      console.error('Error details:', error.details);
+      console.error('Error hint:', error.hint);
+      console.error('Subscription data attempted:', subscriptionData);
       return { data: null, error };
     }
+
+    if (!data) {
+      console.error('❌ Upsert succeeded but no data returned');
+      return { data: null, error: new Error('No data returned from upsert') };
+    }
+
+    console.log('✅ Subscription upserted successfully:', {
+      id: data.id,
+      user_id: data.user_id,
+      plan_id: data.plan_id,
+      status: data.status
+    });
 
     return { data, error: null };
   } catch (err) {
     console.error('❌ Exception upserting subscription:', err);
+    console.error('Exception stack:', err.stack);
+    console.error('Subscription data attempted:', subscriptionData);
     return { data: null, error: err };
   }
 }
@@ -89,5 +133,184 @@ export async function hasActiveSubscription(userId) {
   const notExpired = !currentPeriodEnd || currentPeriodEnd > now;
 
   return isActive && notExpired;
+}
+
+// Get current billing period for a user
+export async function getCurrentBillingPeriod(userId) {
+  const { subscription } = await getUserSubscription(userId);
+  
+  if (subscription && subscription.current_period_start && subscription.current_period_end) {
+    return {
+      periodStart: new Date(subscription.current_period_start),
+      periodEnd: new Date(subscription.current_period_end),
+    };
+  }
+  
+  // For free users, use calendar month
+  const now = new Date();
+  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  
+  return { periodStart, periodEnd };
+}
+
+// Get resume usage count for current period
+export async function getResumeUsageCount(userId) {
+  if (!supabaseAdmin) {
+    return { count: 0, error: new Error('Supabase admin not configured') };
+  }
+
+  try {
+    const { periodStart, periodEnd } = await getCurrentBillingPeriod(userId);
+    
+    console.log(`📊 Counting usage for user ${userId}`);
+    console.log(`📊 Period: ${periodStart.toISOString()} to ${periodEnd.toISOString()}`);
+    
+    // Query by period_start/period_end (more reliable - matches the period the record was created for)
+    // This ensures we match records based on the billing period they were recorded for
+    const { count, error } = await supabaseAdmin
+      .from('resume_usage')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('period_start', periodStart.toISOString())
+      .lte('period_end', periodEnd.toISOString());
+
+    if (error) {
+      console.error('❌ Error counting resume usage:', error);
+      console.error('❌ Error details:', JSON.stringify(error, null, 2));
+      return { count: 0, error };
+    }
+
+    console.log(`✅ Usage count: ${count || 0}`);
+    return { count: count || 0, error: null };
+  } catch (err) {
+    console.error('❌ Exception counting resume usage:', err);
+    return { count: 0, error: err };
+  }
+}
+
+// Record a resume generation
+export async function recordResumeGeneration(userId) {
+  if (!supabaseAdmin) {
+    console.error('❌ Supabase admin client not available');
+    return { data: null, error: new Error('Supabase admin not configured') };
+  }
+
+  try {
+    const { periodStart, periodEnd } = await getCurrentBillingPeriod(userId);
+    
+    const recordData = {
+      user_id: userId,
+      period_start: periodStart.toISOString(),
+      period_end: periodEnd.toISOString(),
+      generated_at: new Date().toISOString(),
+    };
+    
+    console.log(`📝 Recording usage for user ${userId}:`, recordData);
+    
+    const { data, error } = await supabaseAdmin
+      .from('resume_usage')
+      .insert(recordData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ Error recording resume generation:', error);
+      console.error('❌ Error details:', JSON.stringify(error, null, 2));
+      console.error('❌ Attempted data:', JSON.stringify(recordData, null, 2));
+      return { data: null, error };
+    }
+
+    console.log(`✅ Usage recorded successfully:`, data);
+    return { data, error: null };
+  } catch (err) {
+    console.error('❌ Exception recording resume generation:', err);
+    return { data: null, error: err };
+  }
+}
+
+// Get usage statistics for a user
+export async function getUsageStats(userId) {
+  if (!supabaseAdmin) {
+    return { stats: null, error: new Error('Supabase admin not configured') };
+  }
+
+  try {
+    const { subscription } = await getUserSubscription(userId);
+    const { periodStart, periodEnd } = await getCurrentBillingPeriod(userId);
+    const { count, error: countError } = await getResumeUsageCount(userId);
+    
+    if (countError) {
+      return { stats: null, error: countError };
+    }
+
+    const planId = subscription?.plan_id || 'free';
+    
+    return {
+      stats: {
+        used: count,
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString(),
+        planId,
+      },
+      error: null
+    };
+  } catch (err) {
+    console.error('❌ Exception getting usage stats:', err);
+    return { stats: null, error: err };
+  }
+}
+
+// Check if user can generate a resume (within limits)
+export async function canGenerateResume(userId) {
+  try {
+    const { SUBSCRIPTION_PLANS } = await import('./stripe.js');
+    const { subscription } = await getUserSubscription(userId);
+    const { count, error } = await getResumeUsageCount(userId);
+    
+    const planId = subscription?.plan_id || 'free';
+    const plan = SUBSCRIPTION_PLANS[planId];
+    const limit = plan?.limits?.resumesPerMonth || 5;
+    
+    console.log(`📊 Usage Check for user ${userId}:`);
+    console.log(`   Plan: ${planId}`);
+    console.log(`   Limit: ${limit === -1 ? 'unlimited' : limit}`);
+    console.log(`   Used: ${count}`);
+    
+    if (error) {
+      console.error('❌ Error checking usage:', error);
+      // On error, allow generation (fail open) but log it
+      return { allowed: true, used: count, limit, remaining: limit === -1 ? -1 : limit, error: 'Could not verify usage limit' };
+    }
+
+    if (!plan) {
+      console.error('❌ Unknown plan:', planId);
+      return { allowed: false, used: count, limit, remaining: 0, error: 'Unknown subscription plan' };
+    }
+    
+    // -1 means unlimited
+    if (limit === -1) {
+      console.log(`   Remaining: unlimited`);
+      return { allowed: true, used: count, limit: -1, remaining: -1 };
+    }
+
+    const remaining = limit - count;
+    const allowed = remaining > 0;
+    
+    console.log(`   Remaining: ${remaining}`);
+    console.log(`   Can Generate: ${allowed}`);
+
+    return {
+      allowed,
+      used: count,
+      limit,
+      remaining: Math.max(0, remaining),
+      error: allowed ? null : 'Resume generation limit exceeded'
+    };
+  } catch (err) {
+    console.error('❌ Exception checking resume generation limit:', err);
+    // Fail open on exception
+    return { allowed: true, used: 0, limit: 5, remaining: 5, error: 'Could not verify limit' };
+  }
 }
 

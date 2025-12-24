@@ -2,80 +2,97 @@ import axios from 'axios';
 
 const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions';
 
-export async function generateResumeContent({ jobDescription, userProfile, model, systemPrompt }) {
+// Simple content targets per page count (density is handled by CSS, not AI)
+const PAGE_CONTENT_TARGETS = {
+  '1': { bulletsPerJob: 4, skillsCount: 15, summarySentences: 3 },
+  '2': { bulletsPerJob: 6, skillsCount: 25, summarySentences: 5 },
+  '3': { bulletsPerJob: 8, skillsCount: 35, summarySentences: 6 }
+};
+
+export async function generateResumeContent({ jobDescription, userProfile, model, pages = '1' }) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY missing');
 
   const selectedModel = model || process.env.OPENROUTER_MODEL || 'openai/gpt-4o';
+  const targets = PAGE_CONTENT_TARGETS[pages] || PAGE_CONTENT_TARGETS['1'];
+  
+  console.log(`🤖 Generating ${pages}-page resume content...`);
 
-  const systemPromptText = systemPrompt || `You are an expert resume writer that crafts comprehensive, detailed, ATS-friendly resume content tailored to job descriptions. Your goal is to create substantial content that fills resume pages with rich, detailed information.
+  const systemPrompt = `You are an expert resume writer. Generate a tailored ${pages}-page resume.
 
-CRITICAL REQUIREMENTS:
-- Professional Summary: Write a comprehensive 4-6 sentence professional summary in FIRST PERSON tone (use "I", "my", "me") that highlights key skills, experience level, and career achievements. Examples: "I am a...", "I have...", "My experience includes...", "I specialize in..."
-- Each Experience Entry: MUST include 5-7 detailed bullet points (minimum 5, aim for 6-7)
-- Bullet Points: Each bullet should be substantial (15-30 words), include quantifiable metrics, technologies used, and impact achieved
-- Skills: List 10-15 relevant technical and soft skills from the job description
-- Education: Include full details with relevant coursework or achievements if applicable
+⚠️ CRITICAL: This MUST fill ${pages} FULL page(s) with content. Generate EXTENSIVE content.
 
-Return a JSON object with this structure:
+CONTENT REQUIREMENTS:
+- Summary: ${targets.summarySentences} sentences, first-person, tailored to job
+- Experience: ${targets.bulletsPerJob} bullets per job, each with detailed metrics and context
+- Skills: ${targets.skillsCount}+ skills prioritizing job-relevant ones
+- ALWAYS include ALL user-provided sections: education, projects, certifications, awards, languages, publications
+- If user provides projects, certifications, awards, languages, or publications, you MUST include them in your response
+- For ${pages}-page resumes: Generate MORE content - expand descriptions, add more bullets, include all available sections
+
+TAILORING:
+- Match keywords from job description
+- Use action verbs and quantify achievements
+- Prioritize relevant experience
+
+Return JSON:
 {
-  "summary": "A comprehensive 3-5 sentence professional summary in FIRST PERSON (use 'I', 'my', 'me') highlighting experience, skills, and achievements. Example: 'I am a...', 'I have...', 'My experience includes...'",
-  "experiences": [
-    {
-      "title": "Job title",
-      "company": "Company name",
-      "startDate": "YYYY-MM",
-      "endDate": "YYYY-MM or 'Present'",
-      "responsibilities": [
-        "Detailed bullet point 1 with metrics and technologies (15-30 words)",
-        "Detailed bullet point 2 with quantifiable achievements",
-        "Detailed bullet point 3 showing impact and results",
-        "Detailed bullet point 4 with specific technologies/tools",
-        "Detailed bullet point 5 demonstrating leadership/collaboration",
-        "Detailed bullet point 6 (if applicable)",
-        "Detailed bullet point 7 (if applicable)"
-      ]
-    }
-  ],
-  "skills": ["Skill 1", "Skill 2", "Skill 3", ... (10-15 skills)],
-  "education": [
-    {
-      "school": "Institution name",
-      "degree": "Degree name",
-      "year": "Graduation year"
-    }
-  ]
+  "summary": "Professional summary...",
+  "experiences": [{"title": "", "company": "", "location": "", "startDate": "", "endDate": "", "responsibilities": ["..."]}],
+  "skills": ["..."],
+  "education": [{"school": "", "degree": "", "year": "", "coursework": ["..."]}],
+  "projects": [{"name": "", "description": ["..."], "technologies": ["..."]}],
+  "certifications": [{"name": "", "issuer": "", "date": ""}],
+  "awards": [{"name": "", "issuer": "", "date": "", "description": ""}],
+  "languages": [{"language": "", "proficiency": ""}],
+  "publications": [{"title": "", "publisher": "", "date": ""}]
 }
 
-CONTENT GENERATION RULES:
-1. If user provides minimal experience data, expand it significantly with relevant details based on the job description
-2. If user provides existing bullets, enhance and expand each bullet with more detail, metrics, and context
-3. Generate additional relevant experience bullets if needed to reach 5-7 per role
-4. Use specific technologies, tools, and methodologies mentioned in the job description
-5. Include quantifiable achievements (percentages, numbers, scale, time saved, revenue impact, etc.)
-6. Make content comprehensive and detailed - aim to fill resume pages with substantial information
-7. Match keywords from the job description throughout the resume
+Return ONLY valid JSON.`;
 
-Return ONLY valid JSON, no markdown.`;
+  const userMessage = `JOB DESCRIPTION:
+${jobDescription}
 
-  const messages = [
-    { role: 'system', content: systemPromptText },
-    { role: 'user', content: `Job Description: ${jobDescription}\n\nUser Profile: ${JSON.stringify(userProfile)}\n\nGenerate a comprehensive, detailed resume that:
-1. Creates a 4-6 sentence professional summary written in FIRST PERSON tone (use "I", "my", "me"). Examples: "I am a...", "I have...", "My experience includes...", "I specialize in..."
-2. Expands each experience entry to 5-7 detailed bullet points (minimum 5)
-3. Enhances user-provided bullets with more detail, metrics, and context
-4. Generates additional relevant bullets if user data is minimal
-5. Lists 10-15 relevant skills matching the job description
-6. Fills resume pages with substantial, detailed content
-7. Uses specific keywords and technologies from the job description
-8. Includes quantifiable achievements and impact metrics
+USER PROFILE:
+Name: ${userProfile.fullName}
+Email: ${userProfile.email}
+${userProfile.phone ? `Phone: ${userProfile.phone}` : ''}
+${userProfile.location ? `Location: ${userProfile.location}` : ''}
+${userProfile.website ? `Website: ${userProfile.website}` : ''}
 
-CRITICAL: The professional summary MUST be written in first person tone using "I", "my", "me" throughout. Ensure the resume is comprehensive and detailed enough to fill multiple pages with rich content.` }
-  ];
+${userProfile.objective || userProfile.summary ? `Objective: ${userProfile.objective || userProfile.summary}` : ''}
+
+${(userProfile.experiences || []).length > 0 ? `Experience:
+${(userProfile.experiences || []).map(exp => `- ${exp.title} at ${exp.company}${exp.bullets?.length ? `: ${exp.bullets.join(' | ')}` : ''}`).join('\n')}` : ''}
+
+${(userProfile.skills || []).length > 0 ? `Skills: ${(userProfile.skills || []).join(', ')}` : ''}
+
+${(userProfile.education || []).length > 0 ? `Education:
+${(userProfile.education || []).map(edu => `- ${edu.degree} from ${edu.school} (${edu.year})${edu.relevantCoursework ? ` - Coursework: ${Array.isArray(edu.relevantCoursework) ? edu.relevantCoursework.join(', ') : edu.relevantCoursework}` : ''}`).join('\n')}` : ''}
+
+${(userProfile.projects || []).length > 0 ? `Projects:
+${(userProfile.projects || []).map(proj => `- ${proj.name}: ${Array.isArray(proj.description) ? proj.description.join('. ') : proj.description || ''} (${(proj.skills || []).join(', ')})`).join('\n')}` : ''}
+
+${(userProfile.certifications || []).length > 0 ? `Certifications:
+${(userProfile.certifications || []).map(cert => `- ${cert.name}${cert.issuer ? ` from ${cert.issuer}` : ''}${cert.date ? ` (${cert.date})` : ''}`).join('\n')}` : ''}
+
+${(userProfile.awards || []).length > 0 ? `Awards:
+${(userProfile.awards || []).map(award => `- ${award.name}${award.issuer ? ` from ${award.issuer}` : ''}${award.date ? ` (${award.date})` : ''}`).join('\n')}` : ''}
+
+${(userProfile.languages || []).length > 0 ? `Languages:
+${(userProfile.languages || []).map(lang => `- ${lang.language}${lang.proficiency ? ` (${lang.proficiency})` : ''}`).join('\n')}` : ''}
+
+${(userProfile.publications || []).length > 0 ? `Publications:
+${(userProfile.publications || []).map(pub => `- ${pub.title}${pub.publisher ? ` in ${pub.publisher}` : ''}${pub.date ? ` (${pub.date})` : ''}`).join('\n')}` : ''}
+
+Generate a ${pages}-page resume tailored to this job. INCLUDE ALL user-provided sections (projects, certifications, awards, languages, publications) in your response.`;
 
   const response = await axios.post(
     OPENROUTER_API,
-    { model: selectedModel, messages, temperature: 0.3, response_format: { type: 'json_object' } },
+    { model: selectedModel, messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ], temperature: 0.3, response_format: { type: 'json_object' } },
     {
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -86,7 +103,37 @@ CRITICAL: The professional summary MUST be written in first person tone using "I
   );
 
   const text = response?.data?.choices?.[0]?.message?.content ?? '{}';
-  return JSON.parse(text);
+  const aiContent = JSON.parse(text);
+  
+  // Also merge user's experiences website field if not in AI response
+  const mergedExperiences = (aiContent.experiences || []).map((aiExp, idx) => {
+    const userExp = (userProfile.experiences || [])[idx];
+    return {
+      ...aiExp,
+      website: aiExp.website || (userExp?.website)
+    };
+  });
+  
+  // Return AI content with merged experiences
+  // Projects will be merged in resume.js to avoid duplicates
+  const mergedContent = {
+    ...aiContent,
+    experiences: mergedExperiences,
+    // Include user's certifications, awards, languages, publications if provided
+    certifications: (userProfile.certifications || []).length > 0 
+      ? userProfile.certifications 
+      : (aiContent.certifications || []),
+    awards: (userProfile.awards || []).length > 0 
+      ? userProfile.awards 
+      : (aiContent.awards || []),
+    languages: (userProfile.languages || []).length > 0 
+      ? userProfile.languages 
+      : (aiContent.languages || []),
+    publications: (userProfile.publications || []).length > 0 
+      ? userProfile.publications 
+      : (aiContent.publications || [])
+  };
+  
+  console.log(`✅ Content generated - Projects: ${mergedContent.projects?.length || 0}, Experiences: ${mergedContent.experiences?.length || 0}`);
+  return mergedContent;
 }
-
-
