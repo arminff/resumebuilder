@@ -4,21 +4,55 @@ AI-powered resume backend that:
 - Authenticates users with Supabase JWTs
 - Scrapes job postings (static + dynamic) to extract descriptions, responsibilities, and qualifications
 - Generates tailored resume content with OpenRouter (GPT-4o by default)
-- Renders professional, ATS-friendly PDFs via Puppeteer and HTML templates
+- Renders professional, ATS-friendly PDFs via **LaTeX** templates
 
 ### Stack
 - Node.js, Express.js
 - Supabase (Auth + PostgreSQL)
 - Stripe (Subscriptions & Payments)
 - OpenRouter (AI content)
-- Puppeteer (HTML → PDF)
+- **LaTeX / pdflatex** (structured .tex → PDF)
 - Axios + Cheerio (static scraping), Puppeteer (dynamic scraping)
 - Zod (request validation)
 
 ---
 
-Request → Server → Auth → Routes → Utils → AI → Templates → PDF → Response
+Request → Server → Auth → Routes → Utils → AI → LaTeX Template → pdflatex → PDF → Response
 
+---
+
+## Prerequisites
+
+### LaTeX (required for PDF generation)
+
+A working **pdflatex** installation must be on the server's PATH.
+
+**macOS:**
+```bash
+brew install --cask basictex   # minimal (~100 MB)
+# or full distribution:
+brew install --cask mactex-no-gui
+```
+After installing BasicTeX you may need the extra packages:
+```bash
+sudo tlmgr update --self
+sudo tlmgr install enumitem titlesec lmodern mathptmx
+```
+
+**Ubuntu / Debian:**
+```bash
+sudo apt-get install texlive-base texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended
+```
+
+**Docker (production):**
+Use any image that ships `pdflatex` (e.g. `texlive/texlive:latest-minimal`).
+
+Verify:
+```bash
+pdflatex --version
+```
+
+---
 
 ## Quick Start
 
@@ -67,24 +101,26 @@ You can generate a token with your frontend Supabase client or a small script (s
 - `STRIPE_CANCEL_URL` – Cancel redirect URL for checkout
 - `FRONTEND_URL` – Frontend URL for redirects
 - `PORT` – Server port (default: `4000`)
-- `PUPPETEER_EXECUTABLE_PATH` – Custom Chromium path
+- `PUPPETEER_EXECUTABLE_PATH` – Custom Chromium path (scraping only)
 
 ---
 
 ## Endpoints
 
-### Resume & Scraping
+### Resume
 - `GET /api/health` – health check (no auth)
+- `POST /api/resume/generate` – AI-only JSON resume content
+  - body: `{ jobUrl? | jobDescription?, userProfile, model?, pages? }`
+- `POST /api/resume/build` – end-to-end: scrape (optional) + AI + LaTeX → PDF download
+  - body: `{ jobUrl? | jobDescription?, userProfile, template?, model?, pages? }`
+- `POST /api/resume/view` – same as build, but returns PDF inline for browser preview
+- `POST /api/resume/preview` – returns AI content as JSON (for frontend preview)
+
+### Scraping
 - `POST /api/scrape/static` – scrape static page
   - body: `{ "url": "https://..." }`
 - `POST /api/scrape/dynamic` – scrape dynamic/JS-rendered page
   - body: `{ "url": "https://..." }`
-- `POST /api/resume/generate` – AI-only JSON resume content
-  - body: `{ jobUrl? | jobDescription?, userProfile, model? }`
-- `POST /api/resume/pdf` – HTML → PDF
-  - body: `{ html }`
-- `POST /api/resume/build` – end-to-end: scrape (optional) + AI + PDF
-  - body: `{ jobUrl? | jobDescription?, userProfile, template?, model? }`
 
 ### Subscriptions
 - `GET /api/subscription/plans` – get available subscription plans
@@ -97,7 +133,8 @@ You can generate a token with your frontend Supabase client or a small script (s
 
 Notes:
 - Either `jobUrl` or `jobDescription` is required.
-- `template` one of: `modern` (default), `classic`, `minimal`.
+- `template` — one of: `modern` (default), `classic`, `minimal`.
+- `pages` — one of: `1` (default), `2`, `3`.
 
 ---
 
@@ -156,12 +193,13 @@ curl -X POST "http://localhost:4000/api/resume/generate" \
 ---
 
 ## Templates
-Choose via `template`:
-- `modern` – simple, ATS-friendly serif layout (default)
-- `classic` – denser, traditional resume style
-- `minimal` – very clean, compact
 
-All templates are optimized for ATS parsing, use semantic headings, and render to PDF with Puppeteer.
+Choose via `template`:
+- `modern` – clean Latin Modern serif, ATS-friendly with ruled section headings (default)
+- `classic` – traditional Times-family serif, denser layout with thick header rule
+- `minimal` – sans-serif, airy spacing, thin section dividers
+
+All templates are LaTeX-based, producing consistently-formatted PDFs with proper typographic output.
 
 ---
 
@@ -185,9 +223,10 @@ kill -9 $(lsof -ti :4000)
 - Your Supabase token may be missing/expired
 - Ensure `Authorization: Bearer <token>` header is present
 
-Empty/broken PDF:
-- Ensure you are hitting `/api/resume/build` or `/api/resume/pdf` (not `/generate`)
-- We send proper binary with `Content-Type: application/pdf` and `Content-Length`
+PDF generation fails:
+- Ensure `pdflatex` is installed and on PATH (`pdflatex --version`)
+- Check server logs for LaTeX compilation errors
+- Missing packages? Run `sudo tlmgr install <package>`
 
 OpenRouter errors:
 - Verify `OPENROUTER_API_KEY` and internet connectivity
@@ -238,4 +277,3 @@ npm start      # one-time start
 
 ## License
 MIT
-
