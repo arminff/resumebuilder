@@ -6,7 +6,7 @@ import { getStripeSubscription, getStripeCustomer } from '../utils/stripe.js';
 
 export const subscriptionRouter = Router();
 
-// Get available subscription plans
+// Get available subscription plans (no cache so clients always get latest shape e.g. priceLabel)
 subscriptionRouter.get('/plans', (_req, res) => {
   const plans = Object.entries(SUBSCRIPTION_PLANS).map(([id, plan]) => ({
     id,
@@ -16,6 +16,7 @@ subscriptionRouter.get('/plans', (_req, res) => {
     limits: plan.limits,
   }));
 
+  res.setHeader('Cache-Control', 'no-store');
   return res.json({ plans });
 });
 

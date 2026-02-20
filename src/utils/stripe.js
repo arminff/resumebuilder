@@ -154,3 +154,20 @@ export async function getStripeCustomer(customerId) {
   }
 }
 
+// Retrieve Checkout Session with optional expand (e.g. subscription for subscription-mode sessions)
+export async function getCheckoutSession(sessionId, expand = []) {
+  if (!stripe) {
+    throw new Error('Stripe not configured');
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: expand.length ? expand : undefined,
+    });
+    return { session, error: null };
+  } catch (error) {
+    console.error('❌ Error retrieving checkout session:', error);
+    return { session: null, error };
+  }
+}
+

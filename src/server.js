@@ -20,18 +20,9 @@ const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') ?? '*', credentials: true }));
-app.use(express.json({ limit: '2mb' }));
-app.use(morgan('dev'));
-
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
-app.use('/api/', limiter);
-
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, ts: new Date().toISOString() });
-});
 
 // Stripe webhook endpoint (NO AUTH - verified via signature)
-// Must be before auth middleware and use raw body
+// MUST be registered before express.json() so req.body stays raw for signature verification
 app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const signature = req.headers['stripe-signature'];
   
@@ -54,7 +45,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
 
     // Import subscription utilities
     const { upsertSubscription } = await import('./utils/supabase.js');
-    const { getStripeSubscription, getStripeCustomer } = await import('./utils/stripe.js');
+    const { getStripeSubscription, getCheckoutSession } = await import('./utils/stripe.js');
     const { supabaseAdmin } = await import('./utils/supabase.js');
 
     // Handle different webhook events
@@ -77,26 +68,35 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         const customerId = session.customer;
 
         if (!userId) {
-          console.error('❌ Missing userId in checkout session');
+          console.error('❌ Webhook received but upsert failed: Missing userId in checkout session');
           console.error('Session data:', JSON.stringify(session, null, 2));
-          // Still return 200 to acknowledge receipt, but log the error
           return res.json({ received: true, error: 'Missing userId' });
         }
 
         if (!customerId) {
-          console.error('❌ Missing customerId in checkout session');
+          console.error('❌ Webhook received but upsert failed: Missing customerId in checkout session');
           console.error('Session data:', JSON.stringify(session, null, 2));
-          // Still return 200 to acknowledge receipt
           return res.json({ received: true, error: 'Missing customerId' });
         }
 
-        // Get subscription details from Stripe
-        const subscriptionId = session.subscription;
-        
+        // Get subscription ID (may be missing in event; for subscription mode try fetching session with expand)
+        let subscriptionId = typeof session.subscription === 'string'
+          ? session.subscription
+          : session.subscription?.id ?? null;
+
+        if (!subscriptionId && session.mode === 'subscription') {
+          console.log('ℹ️  Subscription ID missing in event, fetching session with expand...');
+          const { session: fullSession, error: fetchErr } = await getCheckoutSession(session.id, ['subscription']);
+          if (!fetchErr && fullSession?.subscription) {
+            subscriptionId = typeof fullSession.subscription === 'object'
+              ? fullSession.subscription.id
+              : fullSession.subscription;
+          }
+        }
+
         if (!subscriptionId) {
-          console.error('❌ Missing subscription ID in checkout session');
+          console.error('❌ Webhook received but upsert failed: Missing subscription ID in checkout session');
           console.error('Session data:', JSON.stringify(session, null, 2));
-          // Still return 200 to acknowledge receipt
           return res.json({ received: true, error: 'Missing subscription ID' });
         }
 
@@ -136,10 +136,8 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         const { data: upsertedData, error: upsertError } = await upsertSubscription(subscriptionData);
         
         if (upsertError) {
-          console.error('❌ Error upserting subscription:', upsertError);
+          console.error('❌ Webhook received but upsert failed: Failed to save subscription to database', upsertError);
           console.error('Subscription data attempted:', subscriptionData);
-          // Still return 200 to acknowledge receipt (Stripe will retry if needed)
-          // But log the error for debugging
           return res.json({ received: true, error: 'Failed to save subscription to database' });
         }
 
@@ -258,7 +256,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
           .single();
 
         if (subError2 || !subscription) {
-          console.error('❌ Subscription not found for invoice customer:', customerId);
+          console.error('❌ Webhook received but no row to update: Subscription not found for invoice customer:', customerId, '(checkout.session.completed is source of truth for initial row)');
           break;
         }
 
@@ -267,7 +265,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
           stripe_customer_id: customerId,
           stripe_subscription_id: subscriptionId,
           status: stripeSub.status,
-          plan_id: subscription.plan_id || 'basic', // Preserve existing plan_id
+          plan_id: subscription.plan_id || 'basic', // Preserve existing plan_id from DB
           current_period_start: new Date(stripeSub.current_period_start * 1000).toISOString(),
           current_period_end: new Date(stripeSub.current_period_end * 1000).toISOString(),
           cancel_at_period_end: stripeSub.cancel_at_period_end || false,
@@ -295,6 +293,20 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
     // Stripe will retry if needed, but we don't want to keep failing
     return res.json({ received: true, error: 'Webhook processing failed' });
   }
+});
+
+app.use(express.json({ limit: '2mb' }));
+app.use(morgan('dev'));
+
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
+app.use('/api/', limiter);
+
+// Root and health (no auth) - so frontend can verify backend is reachable
+app.get('/', (_req, res) => {
+  res.json({ backend: 'ok', port: Number(process.env.PORT || 4000), message: 'Resume Builder API – use /api/health or /api/subscription/status' });
+});
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, ts: new Date().toISOString() });
 });
 
 // Auth-protected routes
