@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { createCheckoutSchema, portalSessionSchema } from '../utils/schemas.js';
 import { createCheckoutSession, createPortalSession, SUBSCRIPTION_PLANS } from '../utils/stripe.js';
 import { getUserSubscription, upsertSubscription, hasActiveSubscription, getEffectivePlanId, getUsageStats, canGenerateResume } from '../utils/supabase.js';
-import { getStripeSubscription, getStripeCustomer } from '../utils/stripe.js';
+import { getStripeSubscription, getCheckoutSession } from '../utils/stripe.js';
+
+const normalizeStripeId = (x) => (x == null ? null : typeof x === 'string' ? x : x?.id ?? null);
 
 export const subscriptionRouter = Router();
 
@@ -93,6 +95,103 @@ subscriptionRouter.post('/checkout', async (req, res) => {
   } catch (err) {
     console.error('❌ Error creating checkout:', err);
     return res.status(500).json({ error: err?.message || 'Failed to create checkout session' });
+  }
+});
+
+// Confirm subscription from success page (fallback when webhook misses or is delayed)
+// Frontend should call this with session_id from URL: /subscription/success?session_id=cs_xxx
+subscriptionRouter.post('/from-session', async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+
+  const sessionId = req.body?.sessionId ?? req.body?.session_id ?? req.query?.session_id;
+  if (!sessionId || typeof sessionId !== 'string') {
+    return res.status(400).json({ error: 'Missing sessionId (from checkout success URL session_id)' });
+  }
+
+  try {
+    const { session, error: fetchErr } = await getCheckoutSession(sessionId, ['subscription']);
+    if (fetchErr || !session) {
+      return res.status(400).json({
+        error: 'Invalid or expired checkout session',
+        details: fetchErr?.message,
+      });
+    }
+
+    const sessionUserId = session.client_reference_id || session.metadata?.userId;
+    if (String(sessionUserId) !== String(userId)) {
+      return res.status(403).json({ error: 'This checkout session does not belong to the current user' });
+    }
+
+    if (session.mode !== 'subscription') {
+      return res.status(400).json({ error: 'Not a subscription checkout session' });
+    }
+
+    const customerId = normalizeStripeId(session.customer);
+    const subscriptionId = normalizeStripeId(session.subscription);
+    if (!customerId || !subscriptionId) {
+      return res.status(400).json({ error: 'Checkout session missing customer or subscription' });
+    }
+
+    let status;
+    let currentPeriodStart;
+    let currentPeriodEnd;
+    let cancelAtPeriodEnd = false;
+
+    if (session.subscription && typeof session.subscription === 'object') {
+      const sub = session.subscription;
+      status = sub.status;
+      currentPeriodStart = sub.current_period_start;
+      currentPeriodEnd = sub.current_period_end;
+      cancelAtPeriodEnd = sub.cancel_at_period_end ?? false;
+    } else {
+      const { subscription: stripeSub, error: subErr } = await getStripeSubscription(subscriptionId);
+      if (subErr || !stripeSub) {
+        return res.status(500).json({
+          error: 'Failed to load subscription from Stripe',
+          details: subErr?.message,
+        });
+      }
+      status = stripeSub.status;
+      currentPeriodStart = stripeSub.current_period_start;
+      currentPeriodEnd = stripeSub.current_period_end;
+      cancelAtPeriodEnd = stripeSub.cancel_at_period_end ?? false;
+    }
+
+    const planId = session.metadata?.planId || 'basic';
+    const subscriptionData = {
+      user_id: userId,
+      stripe_customer_id: customerId,
+      stripe_subscription_id: subscriptionId,
+      status,
+      plan_id: planId,
+      current_period_start: new Date(currentPeriodStart * 1000).toISOString(),
+      current_period_end: new Date(currentPeriodEnd * 1000).toISOString(),
+      cancel_at_period_end: cancelAtPeriodEnd,
+    };
+
+    const { data: updated, error: upsertError } = await upsertSubscription(subscriptionData);
+    if (upsertError) {
+      console.error('❌ from-session upsert failed:', upsertError);
+      return res.status(500).json({
+        error: 'Failed to save subscription',
+        details: upsertError.message,
+      });
+    }
+
+    const isActive = await hasActiveSubscription(userId);
+    return res.json({
+      success: true,
+      message: 'Subscription confirmed',
+      subscription: updated,
+      isActive,
+      plan: planId,
+    });
+  } catch (err) {
+    console.error('❌ Error confirming subscription from session:', err);
+    return res.status(500).json({ error: err?.message || 'Failed to confirm subscription' });
   }
 });
 

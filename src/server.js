@@ -15,6 +15,12 @@ import { subscriptionRouter } from './routes/subscription.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Stripe often sends IDs as expanded objects; normalize to string for DB and API calls
+function normalizeStripeId(x) {
+  if (x == null) return null;
+  return typeof x === 'string' ? x : (x?.id ?? null);
+}
+
 const app = express();
 
 app.set('trust proxy', 1);
@@ -65,7 +71,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         });
         
         const userId = session.client_reference_id || session.metadata?.userId;
-        const customerId = session.customer;
+        const customerId = normalizeStripeId(session.customer);
 
         if (!userId) {
           console.error('❌ Webhook received but upsert failed: Missing userId in checkout session');
@@ -88,9 +94,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
           console.log('ℹ️  Subscription ID missing in event, fetching session with expand...');
           const { session: fullSession, error: fetchErr } = await getCheckoutSession(session.id, ['subscription']);
           if (!fetchErr && fullSession?.subscription) {
-            subscriptionId = typeof fullSession.subscription === 'object'
-              ? fullSession.subscription.id
-              : fullSession.subscription;
+            subscriptionId = normalizeStripeId(fullSession.subscription);
           }
         }
 
@@ -149,7 +153,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const stripeSubscription = event.data.object;
-        const customerId = stripeSubscription.customer;
+        const customerId = normalizeStripeId(stripeSubscription.customer);
 
         if (!customerId) {
           console.error('❌ Missing customer ID in subscription event');
@@ -228,8 +232,8 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
 
       case 'invoice.paid': {
         const invoice = event.data.object;
-        const customerId = invoice.customer;
-        const subscriptionId = invoice.subscription;
+        const customerId = normalizeStripeId(invoice.customer);
+        const subscriptionId = normalizeStripeId(invoice.subscription);
 
         if (!subscriptionId) {
           console.log('ℹ️  Invoice paid but no subscription ID');
