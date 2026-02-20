@@ -6,6 +6,29 @@ import { getStripeSubscription, getCheckoutSession, findSubscriptionByCustomerEm
 
 const normalizeStripeId = (x) => (x == null ? null : typeof x === 'string' ? x : x?.id ?? null);
 
+// When DB has no subscription row, try to recover from Stripe by email (e.g. webhook/from-session missed).
+// Used automatically in GET /status and GET /usage so the frontend doesn't have to call POST /recover.
+async function tryRecoverSubscriptionFromStripe(userId, userEmail) {
+  if (!userEmail) return { recovered: false };
+  const { subscription } = await getUserSubscription(userId);
+  if (subscription?.stripe_subscription_id) return { recovered: false };
+  const { subscription: stripeSub, customerId, planId, error: findErr } = await findSubscriptionByCustomerEmail(userEmail);
+  if (findErr || !stripeSub || !customerId) return { recovered: false };
+  const subscriptionData = {
+    user_id: userId,
+    stripe_customer_id: customerId,
+    stripe_subscription_id: stripeSub.id,
+    status: stripeSub.status,
+    plan_id: planId || 'basic',
+    current_period_start: new Date(stripeSub.current_period_start * 1000).toISOString(),
+    current_period_end: new Date(stripeSub.current_period_end * 1000).toISOString(),
+    cancel_at_period_end: stripeSub.cancel_at_period_end ?? false,
+  };
+  const { error: upsertError } = await upsertSubscription(subscriptionData);
+  if (upsertError) return { recovered: false };
+  return { recovered: true };
+}
+
 export const subscriptionRouter = Router();
 
 // Get available subscription plans (no cache so clients always get latest shape e.g. priceLabel)
@@ -25,16 +48,26 @@ subscriptionRouter.get('/plans', (_req, res) => {
 // Get current user's subscription status
 subscriptionRouter.get('/status', async (req, res) => {
   const userId = req.user?.id;
-  
+  const userEmail = req.user?.email;
+
   if (!userId) {
     return res.status(401).json({ error: 'User not authenticated' });
   }
 
   try {
-    const { subscription, error } = await getUserSubscription(userId);
+    let { subscription, error } = await getUserSubscription(userId);
 
     if (error && error.code !== 'PGRST116') {
       return res.status(500).json({ error: 'Failed to fetch subscription status' });
+    }
+
+    // If no row in DB, try to recover from Stripe by email (user paid but webhook/from-session missed)
+    if (!subscription?.stripe_subscription_id && userEmail) {
+      const { recovered } = await tryRecoverSubscriptionFromStripe(userId, userEmail);
+      if (recovered) {
+        const next = await getUserSubscription(userId);
+        subscription = next.subscription || subscription;
+      }
     }
 
     // Refresh from Stripe when we have a subscription row so Supabase stays in sync (handles stale or delayed webhook)
@@ -391,12 +424,19 @@ subscriptionRouter.post('/sync', async (req, res) => {
 // Get usage and limits for current user
 subscriptionRouter.get('/usage', async (req, res) => {
   const userId = req.user?.id;
-  
+  const userEmail = req.user?.email;
+
   if (!userId) {
     return res.status(401).json({ error: 'User not authenticated' });
   }
 
   try {
+    // If no subscription row, try to recover from Stripe by email so plan/limits are correct
+    const { subscription } = await getUserSubscription(userId);
+    if (!subscription?.stripe_subscription_id && userEmail) {
+      await tryRecoverSubscriptionFromStripe(userId, userEmail);
+    }
+
     const effectivePlanId = await getEffectivePlanId(userId);
     const plan = SUBSCRIPTION_PLANS[effectivePlanId];
     const { stats: usageStats, error: usageError } = await getUsageStats(userId);
