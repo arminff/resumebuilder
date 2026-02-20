@@ -341,12 +341,17 @@ function sectionPublications(content) {
 // Modern template body (xprilion macros)
 // ---------------------------------------------------------------------------
 
+/** Strip protocol and trailing slash for display (e.g. "https://example.com/" -> "example.com") */
+function urlDisplayText(url) {
+  return url.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+}
+
 function buildModernXprilionContact(content) {
   const parts = [];
   if (content.phone) parts.push(`\\faIcon{phone}\\; ${escapeLatex(content.phone)}`);
   if (content.email) parts.push(`\\faIcon{envelope}\\; \\href{mailto:${escapeLatex(content.email)}}{${escapeLatex(content.email)}}`);
-  if (content.website) parts.push(`\\faIcon{globe}\\; \\resumelink{${escapeLatex(content.website)}}{${escapeLatex(content.website.replace(/^https?:\\/\\//i, '').replace(/\\/$/, '')}}`);
-  if (content.linkedin) parts.push(`\\faIcon{linkedin}\\; \\resumelink{${escapeLatex(content.linkedin)}}{${escapeLatex(content.linkedin.replace(/^https?:\\/\\//i, '').replace(/\\/$/, '')}}`);
+  if (content.website) parts.push(`\\faIcon{globe}\\; \\resumelink{${escapeLatex(content.website)}}{${escapeLatex(urlDisplayText(content.website))}}`);
+  if (content.linkedin) parts.push(`\\faIcon{linkedin}\\; \\resumelink{${escapeLatex(content.linkedin)}}{${escapeLatex(urlDisplayText(content.linkedin))}}`);
   if (content.location) parts.push(`\\faIcon{map-marker-alt}\\; ${escapeLatex(content.location)}`);
   return parts.join(' \\sep\n');
 }
