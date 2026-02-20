@@ -171,3 +171,39 @@ export async function getCheckoutSession(sessionId, expand = []) {
   }
 }
 
+// Find an active/trialing subscription for a Stripe customer by email (for recovery when DB has no row)
+export async function findSubscriptionByCustomerEmail(email) {
+  if (!stripe) {
+    throw new Error('Stripe not configured');
+  }
+
+  try {
+    const customers = await stripe.customers.list({ email, limit: 1 });
+    if (!customers.data?.length) return { subscription: null, customerId: null, planId: null, error: null };
+
+    const customerId = customers.data[0].id;
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: 'active',
+      limit: 1,
+    });
+    // If no active, try trialing
+    let list = subscriptions.data;
+    if (!list?.length) {
+      const trialing = await stripe.subscriptions.list({ customer: customerId, status: 'trialing', limit: 1 });
+      list = trialing.data;
+    }
+    if (!list?.length) return { subscription: null, customerId, planId: null, error: null };
+
+    const subscription = list[0];
+    const priceId = subscription.items?.data?.[0]?.price?.id || '';
+    const planId = priceId === (process.env.STRIPE_PRICE_ID_PRO || '') ? 'pro'
+      : priceId === (process.env.STRIPE_PRICE_ID_BASIC || '') ? 'basic'
+      : 'basic';
+    return { subscription, customerId, planId, error: null };
+  } catch (error) {
+    console.error('❌ Error finding subscription by email:', error);
+    return { subscription: null, customerId: null, planId: null, error };
+  }
+}
+

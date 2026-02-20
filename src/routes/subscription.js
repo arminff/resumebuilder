@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { createCheckoutSchema, portalSessionSchema } from '../utils/schemas.js';
 import { createCheckoutSession, createPortalSession, SUBSCRIPTION_PLANS } from '../utils/stripe.js';
 import { getUserSubscription, upsertSubscription, hasActiveSubscription, getEffectivePlanId, getUsageStats, canGenerateResume } from '../utils/supabase.js';
-import { getStripeSubscription, getCheckoutSession } from '../utils/stripe.js';
+import { getStripeSubscription, getCheckoutSession, findSubscriptionByCustomerEmail } from '../utils/stripe.js';
 
 const normalizeStripeId = (x) => (x == null ? null : typeof x === 'string' ? x : x?.id ?? null);
 
@@ -261,6 +261,62 @@ subscriptionRouter.post('/portal', async (req, res) => {
   }
 });
 
+// Recover subscription from Stripe by user email when DB has no row (e.g. webhook and from-session both missed)
+subscriptionRouter.post('/recover', async (req, res) => {
+  const userId = req.user?.id;
+  const userEmail = req.user?.email;
+
+  if (!userId || !userEmail) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+
+  try {
+    const { subscription: dbSubscription } = await getUserSubscription(userId);
+    if (dbSubscription?.stripe_subscription_id) {
+      return res.status(400).json({
+        error: 'Subscription already in database. Use POST /sync to refresh.',
+        hasSubscription: true,
+      });
+    }
+
+    const { subscription: stripeSub, customerId, planId, error: findErr } = await findSubscriptionByCustomerEmail(userEmail);
+    if (findErr || !stripeSub || !customerId) {
+      return res.status(404).json({
+        error: 'No active Stripe subscription found for this email.',
+        hasSubscription: false,
+      });
+    }
+
+    const subscriptionData = {
+      user_id: userId,
+      stripe_customer_id: customerId,
+      stripe_subscription_id: stripeSub.id,
+      status: stripeSub.status,
+      plan_id: planId || 'basic',
+      current_period_start: new Date(stripeSub.current_period_start * 1000).toISOString(),
+      current_period_end: new Date(stripeSub.current_period_end * 1000).toISOString(),
+      cancel_at_period_end: stripeSub.cancel_at_period_end ?? false,
+    };
+
+    const { data: updated, error: upsertError } = await upsertSubscription(subscriptionData);
+    if (upsertError) {
+      return res.status(500).json({ error: 'Failed to save subscription', details: upsertError.message });
+    }
+
+    const isActive = await hasActiveSubscription(userId);
+    return res.json({
+      success: true,
+      message: 'Subscription recovered from Stripe',
+      subscription: updated,
+      isActive,
+      plan: planId || 'basic',
+    });
+  } catch (err) {
+    console.error('❌ Error recovering subscription:', err);
+    return res.status(500).json({ error: err?.message || 'Failed to recover subscription' });
+  }
+});
+
 // Manual sync subscription from Stripe (for recovery/debugging)
 subscriptionRouter.post('/sync', async (req, res) => {
   const userId = req.user?.id;
@@ -277,10 +333,10 @@ subscriptionRouter.post('/sync', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch subscription from database' });
     }
 
-    // If no subscription in DB, can't sync
+    // If no subscription in DB, try recover first
     if (!dbSubscription || !dbSubscription.stripe_subscription_id) {
       return res.status(404).json({ 
-        error: 'No subscription found. Please create a subscription first.',
+        error: 'No subscription found. Try POST /api/subscription/recover to recover from Stripe by email.',
         hasSubscription: false
       });
     }
