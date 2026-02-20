@@ -32,13 +32,20 @@ subscriptionRouter.get('/status', async (req, res) => {
 
   try {
     const { subscription, error } = await getUserSubscription(userId);
-    
+
+    // #region agent log
+    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'E',location:'subscription.js:status_db',message:'status_subscription_from_db',data:{userId,hasRow:!!subscription,dbStatus:subscription?.status??null,dbPlanId:subscription?.plan_id??null,dbPeriodEnd:subscription?.current_period_end??null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     if (error && error.code !== 'PGRST116') {
       return res.status(500).json({ error: 'Failed to fetch subscription status' });
     }
 
     const isActive = await hasActiveSubscription(userId);
     const effectivePlanId = await getEffectivePlanId(userId);
+    // #region agent log
+    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'E',location:'subscription.js:status_result',message:'status_effective_plan',data:{userId,isActive,effectivePlanId},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const plan = SUBSCRIPTION_PLANS[effectivePlanId];
 
     const { stats: usageStats, error: usageError } = await getUsageStats(userId);
@@ -107,6 +114,9 @@ subscriptionRouter.post('/from-session', async (req, res) => {
   }
 
   const sessionId = req.body?.sessionId ?? req.body?.session_id ?? req.query?.session_id;
+  // #region agent log
+  fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'D',location:'subscription.js:from_session_entry',message:'from_session_called',data:{hasSessionId:!!sessionId,userId},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   if (!sessionId || typeof sessionId !== 'string') {
     return res.status(400).json({ error: 'Missing sessionId (from checkout success URL session_id)' });
   }
@@ -174,6 +184,9 @@ subscriptionRouter.post('/from-session', async (req, res) => {
 
     const { data: updated, error: upsertError } = await upsertSubscription(subscriptionData);
     if (upsertError) {
+      // #region agent log
+      fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'D',location:'subscription.js:from_session_upsert_fail',message:'from_session_error',data:{error:upsertError?.message},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       console.error('❌ from-session upsert failed:', upsertError);
       return res.status(500).json({
         error: 'Failed to save subscription',
@@ -181,6 +194,9 @@ subscriptionRouter.post('/from-session', async (req, res) => {
       });
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'D',location:'subscription.js:from_session_success',message:'from_session_success',data:{planId},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const isActive = await hasActiveSubscription(userId);
     return res.json({
       success: true,
@@ -190,6 +206,9 @@ subscriptionRouter.post('/from-session', async (req, res) => {
       plan: planId,
     });
   } catch (err) {
+    // #region agent log
+    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'D',location:'subscription.js:from_session_catch',message:'from_session_error',data:{error:err?.message},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     console.error('❌ Error confirming subscription from session:', err);
     return res.status(500).json({ error: err?.message || 'Failed to confirm subscription' });
   }
