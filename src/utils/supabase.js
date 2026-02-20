@@ -114,6 +114,23 @@ export async function upsertSubscription(subscriptionData) {
   }
 }
 
+// Delete subscription row (e.g. when Stripe subscription no longer exists and recover finds nothing)
+export async function deleteSubscription(userId) {
+  if (!supabaseAdmin) {
+    return { error: new Error('Supabase admin not configured') };
+  }
+  try {
+    const { error } = await supabaseAdmin
+      .from('subscriptions')
+      .delete()
+      .eq('user_id', userId);
+    return { error: error || null };
+  } catch (err) {
+    console.error('❌ Exception deleting subscription:', err);
+    return { error: err };
+  }
+}
+
 // Check if user has active subscription
 export async function hasActiveSubscription(userId) {
   const { subscription, error } = await getUserSubscription(userId);

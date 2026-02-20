@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { createCheckoutSchema, portalSessionSchema } from '../utils/schemas.js';
 import { createCheckoutSession, createPortalSession, SUBSCRIPTION_PLANS } from '../utils/stripe.js';
-import { getUserSubscription, upsertSubscription, hasActiveSubscription, getEffectivePlanId, getUsageStats, canGenerateResume } from '../utils/supabase.js';
+import { getUserSubscription, upsertSubscription, deleteSubscription, hasActiveSubscription, getEffectivePlanId, getUsageStats, canGenerateResume } from '../utils/supabase.js';
 import { getStripeSubscription, getCheckoutSession, findSubscriptionByCustomerEmail } from '../utils/stripe.js';
 
 const normalizeStripeId = (x) => (x == null ? null : typeof x === 'string' ? x : x?.id ?? null);
@@ -87,6 +87,31 @@ subscriptionRouter.get('/status', async (req, res) => {
         });
         const { subscription: fresh } = await getUserSubscription(userId);
         subscriptionForResponse = fresh || subscription;
+      } else if (stripeErr && (stripeErr.code === 'resource_missing' || stripeErr.statusCode === 404)) {
+        // Subscription ID no longer exists in Stripe (deleted/canceled). Try to recover current subscription by email; else clear stale row.
+        if (userEmail) {
+          const { subscription: stripeSubRecover, customerId, planId, error: findErr } = await findSubscriptionByCustomerEmail(userEmail);
+          if (!findErr && stripeSubRecover && customerId) {
+            await upsertSubscription({
+              user_id: userId,
+              stripe_customer_id: customerId,
+              stripe_subscription_id: stripeSubRecover.id,
+              status: stripeSubRecover.status,
+              plan_id: planId || 'basic',
+              current_period_start: new Date(stripeSubRecover.current_period_start * 1000).toISOString(),
+              current_period_end: new Date(stripeSubRecover.current_period_end * 1000).toISOString(),
+              cancel_at_period_end: stripeSubRecover.cancel_at_period_end ?? false,
+            });
+            const { subscription: fresh } = await getUserSubscription(userId);
+            subscriptionForResponse = fresh || subscription;
+          } else {
+            await deleteSubscription(userId);
+            subscriptionForResponse = null;
+          }
+        } else {
+          await deleteSubscription(userId);
+          subscriptionForResponse = null;
+        }
       }
     }
 

@@ -66,7 +66,7 @@ const MODERN_XPRILION_PREAMBLE = `%------------------------
 
 \\usepackage{opensans}
 \\renewcommand{\\familydefault}{\\sfdefault}
-\\newcommand{\\resumelink}[2]{\\href{#1}{#2\\,\\mbox{\\faExternalLinkAlt}}}
+\\newcommand{\\resumelink}[2]{\\href{#1}{#2\\,\\mbox{\\faIcon{external-link-alt}}}}
 
 \\usepackage{latexsym}
 \\usepackage[empty]{fullpage}
