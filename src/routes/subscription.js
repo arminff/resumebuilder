@@ -11,6 +11,7 @@ subscriptionRouter.get('/plans', (_req, res) => {
   const plans = Object.entries(SUBSCRIPTION_PLANS).map(([id, plan]) => ({
     id,
     name: plan.name,
+    priceLabel: plan.priceLabel ?? null,
     features: plan.features,
     limits: plan.limits,
   }));

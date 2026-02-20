@@ -18,6 +18,7 @@ export const SUBSCRIPTION_PLANS = {
   free: {
     name: 'Free',
     priceId: null, // Free plan doesn't have a Stripe price ID
+    priceLabel: 'Free',
     features: ['10 resumes per month', 'Basic templates'],
     limits: {
       resumesPerMonth: 10
@@ -26,6 +27,7 @@ export const SUBSCRIPTION_PLANS = {
   basic: {
     name: 'Basic',
     priceId: process.env.STRIPE_PRICE_ID_BASIC,
+    priceLabel: process.env.STRIPE_PRICE_LABEL_BASIC || 'See Stripe',
     features: ['50 resumes per month', 'All templates', 'Priority support'],
     limits: {
       resumesPerMonth: 50
@@ -34,6 +36,7 @@ export const SUBSCRIPTION_PLANS = {
   pro: {
     name: 'Pro',
     priceId: process.env.STRIPE_PRICE_ID_PRO || 'price_pro_monthly',
+    priceLabel: process.env.STRIPE_PRICE_LABEL_PRO || 'Custom',
     features: ['Unlimited resumes', 'All templates', 'Priority support', 'Custom branding'],
     limits: {
       resumesPerMonth: -1 // -1 means unlimited
