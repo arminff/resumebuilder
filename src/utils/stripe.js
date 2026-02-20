@@ -18,9 +18,9 @@ export const SUBSCRIPTION_PLANS = {
   free: {
     name: 'Free',
     priceId: null, // Free plan doesn't have a Stripe price ID
-    features: ['5 resumes per month', 'Basic templates'],
+    features: ['10 resumes per month', 'Basic templates'],
     limits: {
-      resumesPerMonth: 5
+      resumesPerMonth: 10
     }
   },
   basic: {

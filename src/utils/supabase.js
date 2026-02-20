@@ -270,7 +270,7 @@ export async function canGenerateResume(userId) {
     
     const planId = subscription?.plan_id || 'free';
     const plan = SUBSCRIPTION_PLANS[planId];
-    const limit = plan?.limits?.resumesPerMonth || 5;
+    const limit = plan?.limits?.resumesPerMonth || 10;
     
     console.log(`📊 Usage Check for user ${userId}:`);
     console.log(`   Plan: ${planId}`);
@@ -310,7 +310,7 @@ export async function canGenerateResume(userId) {
   } catch (err) {
     console.error('❌ Exception checking resume generation limit:', err);
     // Fail open on exception
-    return { allowed: true, used: 0, limit: 5, remaining: 5, error: 'Could not verify limit' };
+    return { allowed: true, used: 0, limit: 10, remaining: 10, error: 'Could not verify limit' };
   }
 }
 

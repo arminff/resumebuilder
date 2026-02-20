@@ -45,10 +45,10 @@ subscriptionRouter.get('/status', async (req, res) => {
       subscription: subscription || null,
       isActive,
       plan: planId,
-      limits: plan?.limits || { resumesPerMonth: 5 },
+      limits: plan?.limits || { resumesPerMonth: 10 },
       usage: usageStats ? {
         used: usageStats.used,
-        limit: plan?.limits?.resumesPerMonth || 5,
+        limit: plan?.limits?.resumesPerMonth || 10,
         remaining: limitCheck.remaining,
         periodStart: usageStats.periodStart,
         periodEnd: usageStats.periodEnd,
@@ -234,7 +234,7 @@ subscriptionRouter.get('/usage', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch usage statistics' });
     }
 
-    const limit = plan?.limits?.resumesPerMonth || 5;
+    const limit = plan?.limits?.resumesPerMonth || 10;
 
     const response = {
       plan: planId,
