@@ -117,7 +117,7 @@ export async function upsertSubscription(subscriptionData) {
 // Check if user has active subscription
 export async function hasActiveSubscription(userId) {
   const { subscription, error } = await getUserSubscription(userId);
-  
+
   if (error || !subscription) {
     return false;
   }
@@ -133,6 +133,19 @@ export async function hasActiveSubscription(userId) {
   const notExpired = !currentPeriodEnd || currentPeriodEnd > now;
 
   return isActive && notExpired;
+}
+
+/**
+ * Plan ID used for limits and billing. When subscription is canceled, expired, or past_due,
+ * the user falls back to free tier (they are not stuck on the previous paid plan).
+ */
+export async function getEffectivePlanId(userId) {
+  const isActive = await hasActiveSubscription(userId);
+  if (!isActive) return 'free';
+
+  const { subscription } = await getUserSubscription(userId);
+  const planId = subscription?.plan_id || 'free';
+  return planId === 'basic' || planId === 'pro' ? planId : 'free';
 }
 
 // Get current billing period for a user
@@ -229,23 +242,22 @@ export async function recordResumeGeneration(userId) {
   }
 }
 
-// Get usage statistics for a user
+// Get usage statistics for a user (uses effective plan: free when subscription inactive)
 export async function getUsageStats(userId) {
   if (!supabaseAdmin) {
     return { stats: null, error: new Error('Supabase admin not configured') };
   }
 
   try {
-    const { subscription } = await getUserSubscription(userId);
     const { periodStart, periodEnd } = await getCurrentBillingPeriod(userId);
     const { count, error: countError } = await getResumeUsageCount(userId);
-    
+
     if (countError) {
       return { stats: null, error: countError };
     }
 
-    const planId = subscription?.plan_id || 'free';
-    
+    const planId = await getEffectivePlanId(userId);
+
     return {
       stats: {
         used: count,
@@ -261,14 +273,13 @@ export async function getUsageStats(userId) {
   }
 }
 
-// Check if user can generate a resume (within limits)
+// Check if user can generate a resume (within limits; uses effective plan: free when subscription inactive)
 export async function canGenerateResume(userId) {
   try {
     const { SUBSCRIPTION_PLANS } = await import('./stripe.js');
-    const { subscription } = await getUserSubscription(userId);
     const { count, error } = await getResumeUsageCount(userId);
-    
-    const planId = subscription?.plan_id || 'free';
+
+    const planId = await getEffectivePlanId(userId);
     const plan = SUBSCRIPTION_PLANS[planId];
     const limit = plan?.limits?.resumesPerMonth || 10;
     

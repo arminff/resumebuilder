@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { createCheckoutSchema, portalSessionSchema } from '../utils/schemas.js';
 import { createCheckoutSession, createPortalSession, SUBSCRIPTION_PLANS } from '../utils/stripe.js';
-import { getUserSubscription, upsertSubscription, hasActiveSubscription, getUsageStats, canGenerateResume } from '../utils/supabase.js';
+import { getUserSubscription, upsertSubscription, hasActiveSubscription, getEffectivePlanId, getUsageStats, canGenerateResume } from '../utils/supabase.js';
 import { getStripeSubscription, getStripeCustomer } from '../utils/stripe.js';
 
 export const subscriptionRouter = Router();
@@ -34,21 +34,20 @@ subscriptionRouter.get('/status', async (req, res) => {
     }
 
     const isActive = await hasActiveSubscription(userId);
-    const planId = subscription?.plan_id || 'free';
-    const plan = SUBSCRIPTION_PLANS[planId];
-    
-    // Get usage statistics
+    const effectivePlanId = await getEffectivePlanId(userId);
+    const plan = SUBSCRIPTION_PLANS[effectivePlanId];
+
     const { stats: usageStats, error: usageError } = await getUsageStats(userId);
     const limitCheck = await canGenerateResume(userId);
 
     return res.json({
       subscription: subscription || null,
       isActive,
-      plan: planId,
+      plan: effectivePlanId,
       limits: plan?.limits || { resumesPerMonth: 10 },
       usage: usageStats ? {
         used: usageStats.used,
-        limit: plan?.limits?.resumesPerMonth || 10,
+        limit: plan?.limits?.resumesPerMonth ?? 10,
         remaining: limitCheck.remaining,
         periodStart: usageStats.periodStart,
         periodEnd: usageStats.periodEnd,
@@ -218,14 +217,13 @@ subscriptionRouter.get('/usage', async (req, res) => {
   }
 
   try {
-    const { subscription } = await getUserSubscription(userId);
-    const planId = subscription?.plan_id || 'free';
-    const plan = SUBSCRIPTION_PLANS[planId];
+    const effectivePlanId = await getEffectivePlanId(userId);
+    const plan = SUBSCRIPTION_PLANS[effectivePlanId];
     const { stats: usageStats, error: usageError } = await getUsageStats(userId);
     const limitCheck = await canGenerateResume(userId);
 
     console.log(`📊 /api/subscription/usage endpoint called for user ${userId}`);
-    console.log(`   Plan: ${planId}`);
+    console.log(`   Plan: ${effectivePlanId}`);
     console.log(`   Usage Stats:`, usageStats);
     console.log(`   Limit Check:`, limitCheck);
 
@@ -237,7 +235,7 @@ subscriptionRouter.get('/usage', async (req, res) => {
     const limit = plan?.limits?.resumesPerMonth || 10;
 
     const response = {
-      plan: planId,
+      plan: effectivePlanId,
       limit: limit === -1 ? null : limit, // null means unlimited
       used: usageStats?.used || 0,
       remaining: limitCheck.remaining,
