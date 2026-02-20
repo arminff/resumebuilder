@@ -18,17 +18,20 @@ export async function generateResumeContent({ jobDescription, userProfile, model
   
   console.log(`🤖 Generating ${pages}-page resume content...`);
 
-  const systemPrompt = `You are an expert resume writer. Generate a tailored ${pages}-page resume.
+  const systemPrompt = `You are an expert resume writer. Generate a tailored resume that fits on exactly ${pages} page(s).
 
-⚠️ CRITICAL: This MUST fill ${pages} FULL page(s) with content. Generate EXTENSIVE content.
+⚠️ PAGE COUNT IS MANDATORY: The user chose ${pages} page(s). You MUST generate content that fits on exactly that many pages—no more, no less.
+- For 1 page: Be concise. ${targets.bulletsPerJob} bullets per job max, ${targets.summarySentences} sentences summary, ~${targets.skillsCount} skills. Do not overflow.
+- For 2 pages: Use the full two pages. Expand bullets and summary appropriately.
+- For 3 pages: Fill all three pages with substantive content; include all sections and expand where relevant.
 
 CONTENT REQUIREMENTS:
 - Summary: ${targets.summarySentences} sentences, first-person, tailored to job
-- Experience: ${targets.bulletsPerJob} bullets per job, each with detailed metrics and context
+- Experience: ${targets.bulletsPerJob} bullets per job (adjust for page count), each with detailed metrics and context
 - Skills: ${targets.skillsCount}+ skills prioritizing job-relevant ones
 - ALWAYS include ALL user-provided sections: education, projects, certifications, awards, languages, publications
 - If user provides projects, certifications, awards, languages, or publications, you MUST include them in your response
-- For ${pages}-page resumes: Generate MORE content - expand descriptions, add more bullets, include all available sections
+- For ${pages}-page resumes: Generate content that FILLS but does NOT EXCEED ${pages} page(s).
 
 TAILORING:
 - Match keywords from job description
@@ -38,8 +41,9 @@ TAILORING:
 Return JSON:
 {
   "summary": "Professional summary...",
-  "experiences": [{"title": "", "company": "", "location": "", "startDate": "", "endDate": "", "responsibilities": ["..."]}],
+  "experiences": [{"title": "", "company": "", "location": "", "startDate": "", "endDate": "", "responsibilities": ["..."], "technologies": ["..."]}],
   "skills": ["..."],
+  "skillCategories": {"CategoryName": ["skill1", "skill2"]},
   "education": [{"school": "", "degree": "", "year": "", "coursework": ["..."]}],
   "projects": [{"name": "", "description": ["..."], "technologies": ["..."]}],
   "certifications": [{"name": "", "issuer": "", "date": ""}],
@@ -85,7 +89,7 @@ ${(userProfile.languages || []).map(lang => `- ${lang.language}${lang.proficienc
 ${(userProfile.publications || []).length > 0 ? `Publications:
 ${(userProfile.publications || []).map(pub => `- ${pub.title}${pub.publisher ? ` in ${pub.publisher}` : ''}${pub.date ? ` (${pub.date})` : ''}`).join('\n')}` : ''}
 
-Generate a ${pages}-page resume tailored to this job. INCLUDE ALL user-provided sections (projects, certifications, awards, languages, publications) in your response.`;
+Generate a resume tailored to this job that fits on exactly ${pages} page(s). Do not exceed ${pages} page(s). INCLUDE ALL user-provided sections (projects, certifications, awards, languages, publications) in your response.`;
 
   const response = await axios.post(
     OPENROUTER_API,

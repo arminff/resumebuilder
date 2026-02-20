@@ -42,6 +42,7 @@ sudo tlmgr install enumitem titlesec lmodern mathptmx
 **Ubuntu / Debian:**
 ```bash
 sudo apt-get install texlive-base texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended
+# Modern template uses OpenSans; if needed: sudo tlmgr install opensans
 ```
 
 **Docker (production):**

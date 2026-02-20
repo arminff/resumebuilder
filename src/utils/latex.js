@@ -55,6 +55,110 @@ const MARGINS = {
 };
 
 // ---------------------------------------------------------------------------
+// Modern template: xprilion resume (Anubhav Singh)
+// https://github.com/xprilion - License: MIT
+// ---------------------------------------------------------------------------
+
+const MODERN_XPRILION_PREAMBLE = `%------------------------
+% Resume Template (xprilion)
+%------------------------
+\\documentclass[a4paper,20pt]{article}
+
+\\usepackage{opensans}
+\\renewcommand{\\familydefault}{\\sfdefault}
+\\newcommand{\\resumelink}[2]{\\href{#1}{#2\\,\\mbox{\\faExternalLinkAlt}}}
+
+\\usepackage{latexsym}
+\\usepackage[empty]{fullpage}
+\\usepackage{titlesec}
+\\usepackage{marvosym}
+\\usepackage[usenames,dvipsnames]{color}
+\\usepackage{xcolor}
+\\usepackage{enumitem}
+\\usepackage{hyperref}
+\\usepackage{fancyhdr}
+\\usepackage{fontawesome5}
+\\usepackage{array}
+
+\\definecolor{AccentDark}{HTML}{000000}
+\\definecolor{Accent}{HTML}{000000}
+\\definecolor{Muted}{HTML}{000000}
+\\definecolor{TextGray}{HTML}{000000}
+
+\\hypersetup{
+colorlinks=true,
+urlcolor=black,
+linkcolor=black
+}
+
+\\pagestyle{fancy}
+\\fancyhf{}
+\\fancyfoot{}
+\\renewcommand{\\headrulewidth}{0pt}
+\\renewcommand{\\footrulewidth}{0pt}
+
+\\addtolength{\\oddsidemargin}{-0.530in}
+\\addtolength{\\evensidemargin}{-0.375in}
+\\addtolength{\\textwidth}{1in}
+\\addtolength{\\topmargin}{-.45in}
+\\addtolength{\\textheight}{1in}
+
+\\urlstyle{rm}
+\\raggedbottom
+\\raggedright
+\\setlength{\\tabcolsep}{0in}
+
+\\setlength{\\parindent}{0pt}
+\\setlength{\\parskip}{0.9pt}
+\\renewcommand{\\baselinestretch}{1.00}
+
+\\titleformat{\\section}{
+\\vspace{3.5pt}\\scshape\\raggedright\\large\\color{AccentDark}
+}{}{0em}{}[\\color{Accent}\\titlerule \\vspace{1.75pt}]
+
+\\titlespacing*{\\section}{0pt}{6.5pt}{3.5pt}
+\\setlist[itemize]{leftmargin=*, itemsep=1.5pt, topsep=2.5pt, parsep=0pt, partopsep=0pt}
+
+\\newcolumntype{L}[1]{>{\\raggedright\\arraybackslash}p{#1}}
+\\newcolumntype{R}[1]{>{\\raggedleft\\arraybackslash}p{#1}}
+
+\\newcommand{\\resumeSkillItem}[2]{
+\\item\\small{\\textbf{\\textcolor{AccentDark}{#1}}{: #2}}
+}
+
+\\newcommand{\\resumeItem}[2]{
+\\item\\small{#2}
+}
+
+\\newcommand{\\resumeSubItem}[2]{\\resumeSkillItem{#1}{#2}\\vspace{-1pt}}
+\\newcommand{\\resumeSkillListStart}{\\begin{itemize}[leftmargin=*, itemsep=2.3pt, topsep=3pt]}
+\\newcommand{\\resumeSkillListEnd}{\\end{itemize}}
+
+\\newcommand{\\resumeSubheading}[4]{
+\\vspace{1.5pt}\\item[]
+\\begin{tabular*}{\\textwidth}{@{}L{0.74\\textwidth}@{\\extracolsep{\\fill}}R{0.26\\textwidth}@{}}
+\\textbf{\\textcolor{AccentDark}{#1}} & {\\footnotesize\\textcolor{Muted}{\\textbf{#2}}} \\\\
+\\textit{#3} & \\textit{\\textcolor{Muted}{#4}} \\\\
+\\end{tabular*}\\vspace{1.5pt}
+}
+
+\\newcommand{\\resumeSubheadingWithTech}[5]{
+\\vspace{1.5pt}\\item[]
+\\begin{tabular*}{\\textwidth}{@{}L{0.74\\textwidth}@{\\extracolsep{\\fill}}R{0.26\\textwidth}@{}}
+\\textbf{\\textcolor{AccentDark}{#1}}{\\footnotesize\\textcolor{AccentDark}{\\;|\\; #5}} & {\\footnotesize\\textcolor{Muted}{\\textbf{#2}}} \\\\
+\\textit{#3} & \\textit{\\textcolor{Muted}{#4}} \\\\
+\\end{tabular*}\\vspace{1.5pt}
+}
+
+\\newcommand{\\resumeSubHeadingListStart}{\\begin{itemize}[leftmargin=*]}
+\\newcommand{\\resumeSubHeadingListEnd}{\\end{itemize}}
+\\newcommand{\\resumeItemListStart}{\\begin{itemize}}
+\\newcommand{\\resumeItemListEnd}{\\end{itemize}\\vspace{0.5pt}}
+
+\\newcommand{\\sep}{\\qquad}
+`;
+
+// ---------------------------------------------------------------------------
 // Section generators (shared across templates; style differs via preamble)
 // ---------------------------------------------------------------------------
 
@@ -234,42 +338,154 @@ function sectionPublications(content) {
 }
 
 // ---------------------------------------------------------------------------
-// Template: Modern  (Latin Modern serif, clean rules, ATS-friendly)
+// Modern template body (xprilion macros)
+// ---------------------------------------------------------------------------
+
+function buildModernXprilionContact(content) {
+  const parts = [];
+  if (content.phone) parts.push(`\\faIcon{phone}\\; ${escapeLatex(content.phone)}`);
+  if (content.email) parts.push(`\\faIcon{envelope}\\; \\href{mailto:${escapeLatex(content.email)}}{${escapeLatex(content.email)}}`);
+  if (content.website) parts.push(`\\faIcon{globe}\\; \\resumelink{${escapeLatex(content.website)}}{${escapeLatex(content.website.replace(/^https?:\\/\\//i, '').replace(/\\/$/, '')}}`);
+  if (content.linkedin) parts.push(`\\faIcon{linkedin}\\; \\resumelink{${escapeLatex(content.linkedin)}}{${escapeLatex(content.linkedin.replace(/^https?:\\/\\//i, '').replace(/\\/$/, '')}}`);
+  if (content.location) parts.push(`\\faIcon{map-marker-alt}\\; ${escapeLatex(content.location)}`);
+  return parts.join(' \\sep\n');
+}
+
+function buildModernXprilionBody(name, content) {
+  const summary = content.summary || content.professionalSummary || '';
+  const contactLine = buildModernXprilionContact(content);
+
+  let body = `%-------------------- Heading -----------------
+\\begin{center}
+{\\Huge \\textbf{\\textcolor{AccentDark}{${escapeLatex(name)}}}}\\\\[5pt]
+\\small
+${contactLine}
+\\end{center}
+`;
+
+  if (summary) {
+    body += `\n%-------------------- Summary -----------------\n\\section{Summary}\n${escapeLatex(summary)}\n\n`;
+  }
+
+  // Skills (xprilion: \resumeSubItem{Category}{comma-separated})
+  const skills = safe(content.skills);
+  const skillCategories = content.skillCategories;
+  if (skills.length > 0 || (skillCategories && Object.keys(skillCategories).length > 0)) {
+    body += `%-------------------- Skills ------------------\n\\section{Skills}\n\\resumeSkillListStart\n`;
+    if (skillCategories && typeof skillCategories === 'object') {
+      for (const [cat, items] of Object.entries(skillCategories)) {
+        body += `\\resumeSubItem{${escapeLatex(cat)}}{${safe(items).map((s) => escapeLatex(s)).join(', ')}}\n`;
+      }
+    } else {
+      body += `\\resumeSubItem{Technical}{${skills.map((s) => escapeLatex(s)).join(', ')}}\n`;
+    }
+    body += `\\resumeSkillListEnd\n\n`;
+  }
+
+  // Experience (\resumeSubheadingWithTech{Title}{Date}{Company}{}{Tech})
+  const experiences = safe(content.experiences || content.experience);
+  if (experiences.length > 0) {
+    body += `%-------------------- Experience --------------\n\\section{Experience}\n\\resumeSubHeadingListStart\n`;
+    for (const exp of experiences) {
+      const title = escapeLatex(exp.title || exp.jobTitle || '');
+      const start = escapeLatex(exp.startDate || '');
+      const end = escapeLatex(exp.endDate || 'Present');
+      const dateStr = `${start} -- ${end}`;
+      const companyName = escapeLatex(exp.company || exp.companyName || '');
+      const companyPart = exp.website
+        ? `\\resumelink{${escapeLatex(exp.website)}}{${companyName}}`
+        : companyName;
+      const tech = safe(exp.technologies || exp.skills).map((t) => escapeLatex(t)).join(', ');
+      body += `\\resumeSubheadingWithTech{${title}}{${dateStr}}{${companyPart}}{}{${tech}}\n`;
+      body += `\\resumeItemListStart\n`;
+      for (const b of safe(exp.responsibilities || exp.bullets)) {
+        if (b) body += `\\resumeItem{}{${escapeLatex(b)}}\n`;
+      }
+      body += `\\resumeItemListEnd\n`;
+    }
+    body += `\\resumeSubHeadingListEnd\n\n`;
+  }
+
+  // Projects (\resumeSubheading{Name}{Date}{Tech}{})
+  const projects = safe(content.projects);
+  if (projects.length > 0) {
+    body += `%-------------------- Projects ----------------
+\\section{Projects}\n\\resumeSubHeadingListStart\n`;
+    for (const proj of projects) {
+      const name = escapeLatex(proj.name || '');
+      const date = escapeLatex(proj.date || '');
+      const tech = safe(proj.technologies || proj.skills).map((t) => escapeLatex(t)).join(', ');
+      body += `\\resumeSubheading{${name}}{${date}}{${tech}}{}\n`;
+      body += `\\resumeItemListStart\n`;
+      for (const d of safe(proj.description)) {
+        if (d) body += `\\resumeItem{}{${escapeLatex(d)}}\n`;
+      }
+      body += `\\resumeItemListEnd\n`;
+    }
+    body += `\\resumeSubHeadingListEnd\n\n`;
+  }
+
+  // Education
+  const education = safe(content.education);
+  if (education.length > 0) {
+    body += `%-------------------- Education ----------------
+\\section{Education}\n\\resumeSubHeadingListStart\n`;
+    for (const edu of education) {
+      const school = escapeLatex(edu.school || edu.institution || '');
+      const year = escapeLatex(edu.year || edu.graduationYear || '');
+      const degree = escapeLatex([edu.degree, edu.field].filter(Boolean).join(' in ') || '');
+      body += `\\resumeSubheading{${school}}{${year}}{${degree}}{}\n`;
+    }
+    body += `\\resumeSubHeadingListEnd\n\n`;
+  }
+
+  // Certifications, Awards, Languages, Publications (simple list style)
+  const certs = safe(content.certifications);
+  if (certs.length > 0) {
+    body += `\\section{Certifications}\n\\resumeSubHeadingListStart\n`;
+    for (const c of certs) {
+      body += `\\item[] \\textbf{${escapeLatex(c.name)}}${c.issuer ? ` --- ${escapeLatex(c.issuer)}` : ''}${c.date ? ` \\hfill ${escapeLatex(c.date)}` : ''}\n`;
+    }
+    body += `\\resumeSubHeadingListEnd\n\n`;
+  }
+  const awards = safe(content.awards);
+  if (awards.length > 0) {
+    body += `\\section{Awards \\& Honors}\n\\resumeSubHeadingListStart\n`;
+    for (const a of awards) {
+      body += `\\item[] \\textbf{${escapeLatex(a.name)}}${a.issuer ? ` --- ${escapeLatex(a.issuer)}` : ''}${a.date ? ` \\hfill ${escapeLatex(a.date)}` : ''}\n`;
+    }
+    body += `\\resumeSubHeadingListEnd\n\n`;
+  }
+  const langs = safe(content.languages);
+  if (langs.length > 0) {
+    body += `\\section{Languages}\n\\resumeSkillListStart\n`;
+    body += `\\resumeSubItem{Languages}{${langs.map((l) => escapeLatex(l.language) + (l.proficiency ? ` (${escapeLatex(l.proficiency)})` : '')).join(', ')}}\n`;
+    body += `\\resumeSkillListEnd\n\n`;
+  }
+  const pubs = safe(content.publications);
+  if (pubs.length > 0) {
+    body += `\\section{Publications}\n\\resumeSubHeadingListStart\n`;
+    for (const p of pubs) {
+      body += `\\item[] \\textit{${escapeLatex(p.title)}}${p.publisher ? ` --- ${escapeLatex(p.publisher)}` : ''}${p.date ? ` \\hfill ${escapeLatex(p.date)}` : ''}\n`;
+    }
+    body += `\\resumeSubHeadingListEnd\n`;
+  }
+
+  return body;
+}
+
+// ---------------------------------------------------------------------------
+// Template: Modern (xprilion resume template - OpenSans, A4, ATS-friendly)
 // ---------------------------------------------------------------------------
 
 function modernTemplate(name, content, pages) {
-  const margin = MARGINS[pages] || MARGINS['1'];
-  const contactLine = buildContactLine(content, ' \\textbullet{} ');
-  const summary = content.summary || content.professionalSummary || '';
-
-  return `\\documentclass[10.5pt,letterpaper]{article}
-
-\\usepackage[utf8]{inputenc}
-\\usepackage[T1]{fontenc}
-\\usepackage{lmodern}
-\\usepackage[top=${margin},bottom=${margin},left=${margin},right=${margin}]{geometry}
-\\usepackage{enumitem}
-\\usepackage{titlesec}
-\\usepackage[hidelinks]{hyperref}
-
-\\pagestyle{empty}
-\\setlength{\\parindent}{0pt}
-\\setlength{\\parskip}{0pt}
-
-% Section: bold, rule below
-\\titleformat{\\section}{\\large\\bfseries\\raggedright}{}{0em}{}[\\vspace{-6pt}\\titlerule]
-\\titlespacing*{\\section}{0pt}{8pt}{4pt}
-
+  const body = buildModernXprilionBody(name, content);
+  return `${MODERN_XPRILION_PREAMBLE}
 \\begin{document}
+\\color{TextGray}
 
-% --- Header ---
-\\begin{center}
-{\\LARGE\\bfseries ${escapeLatex(name)}}\\\\[4pt]
-{\\small ${contactLine}}
-\\end{center}
-\\vspace{2pt}
-
-${sectionSummary(summary)}${sectionExperience(content, 'modern')}${sectionSkills(content)}${sectionEducation(content)}${sectionProjects(content)}${sectionCertifications(content)}${sectionAwards(content)}${sectionLanguages(content)}${sectionPublications(content)}\\end{document}
+${body}
+\\end{document}
 `;
 }
 
