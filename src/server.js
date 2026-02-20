@@ -31,9 +31,6 @@ app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') ?? '*', credentials: 
 // MUST be registered before express.json() so req.body stays raw for signature verification
 app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const signature = req.headers['stripe-signature'];
-  // #region agent log
-  fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'A',location:'server.js:webhook_entry',message:'webhook_request_received',data:{hasSignature:!!signature,rawBodyType:typeof req.body,isBuffer:Buffer.isBuffer(req.body),rawBodyLength:req.body?.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (!signature) {
     return res.status(400).json({ error: 'Missing stripe-signature header' });
@@ -45,10 +42,6 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
   try {
     const { verifyWebhookSignature } = await import('./utils/stripe.js');
     const { event, error } = verifyWebhookSignature(rawBody, signature);
-
-    // #region agent log
-    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'A',location:'server.js:webhook_after_verify',message:error?'webhook_verify_failed':'webhook_verified',data:{eventType:event?.type||null,verifyError:error?.message||null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
 
     if (error || !event) {
       return res.status(400).json({ error: 'Webhook signature verification failed' });
@@ -80,10 +73,6 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         const userId = session.client_reference_id || session.metadata?.userId;
         const customerId = normalizeStripeId(session.customer);
 
-        // #region agent log
-        fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'B',location:'server.js:checkout_session_ids',message:'checkout_session_extracted',data:{hasUserId:!!userId,hasCustomerId:!!customerId,mode:session.mode},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-
         if (!userId) {
           console.error('❌ Webhook received but upsert failed: Missing userId in checkout session');
           console.error('Session data:', JSON.stringify(session, null, 2));
@@ -110,9 +99,6 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         }
 
         if (!subscriptionId) {
-          // #region agent log
-          fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'B',location:'server.js:checkout_missing_sub_id',message:'webhook_missing_subscription_id',data:{},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           console.error('❌ Webhook received but upsert failed: Missing subscription ID in checkout session');
           console.error('Session data:', JSON.stringify(session, null, 2));
           return res.json({ received: true, error: 'Missing subscription ID' });
@@ -151,13 +137,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         };
 
         console.log('💾 Upserting subscription to database:', subscriptionData);
-        // #region agent log
-        fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'C',location:'server.js:webhook_before_upsert',message:'webhook_upsert_attempt',data:{userId,planId,status:stripeSub.status},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         const { data: upsertedData, error: upsertError } = await upsertSubscription(subscriptionData);
-        // #region agent log
-        fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'C',location:'server.js:webhook_after_upsert',message:upsertError?'webhook_upsert_failed':'webhook_upsert_ok',data:{upsertError:upsertError?.message||null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
 
         if (upsertError) {
           console.error('❌ Webhook received but upsert failed: Failed to save subscription to database', upsertError);

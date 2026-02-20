@@ -132,6 +132,11 @@ CREATE POLICY "Service role full access resume_usage"
 
 The backend uses the service role to insert and count rows; authenticated users only need SELECT on their own rows if you expose usage in the API.
 
+### How "used" and "remaining" work
+
+- **Resume usage (used)** is not a single column; it is the **count of rows** in `resume_usage` for the current user and current billing period (from `subscriptions.current_period_start/end` or calendar month for free users). The backend does this in `getResumeUsageCount()`.
+- **Remaining resumes** are **not stored** in Supabase. They are **computed at runtime** in the backend as `remaining = plan_limit - used` (where the plan limit comes from the subscription plan, e.g. 10 for free, 50 for basic, unlimited for pro). So there is no table or column for "remaining" — only the `resume_usage` table and the plan limits (in app config) are needed.
+
 ## Setup Instructions
 
 1. **Open Supabase SQL Editor**

@@ -128,6 +128,8 @@ You can generate a token with your frontend Supabase client or a small script (s
 - `GET /api/subscription/status` – get current user's subscription status
 - `POST /api/subscription/checkout` – create Stripe checkout session
   - body: `{ "planId": "basic" | "pro" }`
+- `POST /api/subscription/from-session` – confirm subscription from success page (call with `session_id` from URL so the backend updates the subscription even if the webhook has not run yet)
+  - body: `{ "sessionId": "<session_id from success URL>" }`
 - `POST /api/subscription/portal` – create Stripe customer portal session
   - body: `{ "returnUrl"?: "https://..." }`
 - `POST /api/subscription/webhook` – Stripe webhook endpoint (no auth, verified via signature)
@@ -260,9 +262,9 @@ This backend includes Stripe subscription integration. See [STRIPE_SETUP.md](./S
 
 1. User selects plan → Frontend calls `/api/subscription/checkout`
 2. Backend creates Stripe Checkout Session → Returns checkout URL
-3. User completes payment on Stripe → Stripe sends webhook
-4. Backend processes webhook → Updates Supabase database
-5. User subscription status synced → Frontend queries `/api/subscription/status`
+3. User completes payment on Stripe → Stripe sends webhook (and redirects to success URL with `session_id`)
+4. When the user lands on the success page, the frontend **must** call `POST /api/subscription/from-session` with body `{ "sessionId": "<session_id from URL>" }` so the subscription is created/updated immediately even if the webhook has not run yet.
+5. Backend processes webhook (and/or from-session) → Updates Supabase; GET `/api/subscription/status` also refreshes from Stripe when a subscription row exists so status stays consistent.
 
 See [STRIPE_SETUP.md](./STRIPE_SETUP.md) for detailed documentation.
 

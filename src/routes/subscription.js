@@ -33,26 +33,39 @@ subscriptionRouter.get('/status', async (req, res) => {
   try {
     const { subscription, error } = await getUserSubscription(userId);
 
-    // #region agent log
-    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'E',location:'subscription.js:status_db',message:'status_subscription_from_db',data:{userId,hasRow:!!subscription,dbStatus:subscription?.status??null,dbPlanId:subscription?.plan_id??null,dbPeriodEnd:subscription?.current_period_end??null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-
     if (error && error.code !== 'PGRST116') {
       return res.status(500).json({ error: 'Failed to fetch subscription status' });
     }
 
+    // Refresh from Stripe when we have a subscription row so Supabase stays in sync (handles stale or delayed webhook)
+    let subscriptionForResponse = subscription;
+    if (subscription?.stripe_subscription_id) {
+      const { subscription: stripeSub, error: stripeErr } = await getStripeSubscription(subscription.stripe_subscription_id);
+      if (!stripeErr && stripeSub) {
+        await upsertSubscription({
+          user_id: userId,
+          stripe_customer_id: subscription.stripe_customer_id,
+          stripe_subscription_id: subscription.stripe_subscription_id,
+          status: stripeSub.status,
+          plan_id: subscription.plan_id || 'basic',
+          current_period_start: new Date(stripeSub.current_period_start * 1000).toISOString(),
+          current_period_end: new Date(stripeSub.current_period_end * 1000).toISOString(),
+          cancel_at_period_end: stripeSub.cancel_at_period_end ?? false,
+        });
+        const { subscription: fresh } = await getUserSubscription(userId);
+        subscriptionForResponse = fresh || subscription;
+      }
+    }
+
     const isActive = await hasActiveSubscription(userId);
     const effectivePlanId = await getEffectivePlanId(userId);
-    // #region agent log
-    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'E',location:'subscription.js:status_result',message:'status_effective_plan',data:{userId,isActive,effectivePlanId},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const plan = SUBSCRIPTION_PLANS[effectivePlanId];
 
     const { stats: usageStats, error: usageError } = await getUsageStats(userId);
     const limitCheck = await canGenerateResume(userId);
 
     return res.json({
-      subscription: subscription || null,
+      subscription: subscriptionForResponse || null,
       isActive,
       plan: effectivePlanId,
       limits: plan?.limits || { resumesPerMonth: 10 },
@@ -105,8 +118,11 @@ subscriptionRouter.post('/checkout', async (req, res) => {
   }
 });
 
-// Confirm subscription from success page (fallback when webhook misses or is delayed)
-// Frontend should call this with session_id from URL: /subscription/success?session_id=cs_xxx
+// Confirm subscription from success page (fallback when webhook misses or is delayed).
+// Frontend MUST call this when the user lands on the subscription success page with the
+// checkout session_id from the URL (e.g. /subscription/success?session_id=cs_xxx). Send
+// body: { sessionId: "<session_id from URL>" } so the backend can create/update the
+// subscription row immediately even if the webhook has not run yet.
 subscriptionRouter.post('/from-session', async (req, res) => {
   const userId = req.user?.id;
   if (!userId) {
@@ -114,9 +130,6 @@ subscriptionRouter.post('/from-session', async (req, res) => {
   }
 
   const sessionId = req.body?.sessionId ?? req.body?.session_id ?? req.query?.session_id;
-  // #region agent log
-  fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'D',location:'subscription.js:from_session_entry',message:'from_session_called',data:{hasSessionId:!!sessionId,userId},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   if (!sessionId || typeof sessionId !== 'string') {
     return res.status(400).json({ error: 'Missing sessionId (from checkout success URL session_id)' });
   }
@@ -184,9 +197,6 @@ subscriptionRouter.post('/from-session', async (req, res) => {
 
     const { data: updated, error: upsertError } = await upsertSubscription(subscriptionData);
     if (upsertError) {
-      // #region agent log
-      fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'D',location:'subscription.js:from_session_upsert_fail',message:'from_session_error',data:{error:upsertError?.message},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       console.error('❌ from-session upsert failed:', upsertError);
       return res.status(500).json({
         error: 'Failed to save subscription',
@@ -194,9 +204,6 @@ subscriptionRouter.post('/from-session', async (req, res) => {
       });
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'D',location:'subscription.js:from_session_success',message:'from_session_success',data:{planId},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     const isActive = await hasActiveSubscription(userId);
     return res.json({
       success: true,
@@ -206,9 +213,6 @@ subscriptionRouter.post('/from-session', async (req, res) => {
       plan: planId,
     });
   } catch (err) {
-    // #region agent log
-    fetch('http://127.0.0.1:7278/ingest/8c8f9525-4253-4ba4-8abc-2eb9cfebbecf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'44c744'},body:JSON.stringify({sessionId:'44c744',hypothesisId:'D',location:'subscription.js:from_session_catch',message:'from_session_error',data:{error:err?.message},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     console.error('❌ Error confirming subscription from session:', err);
     return res.status(500).json({ error: err?.message || 'Failed to confirm subscription' });
   }
