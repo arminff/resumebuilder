@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { generateSchema } from '../utils/schemas.js';
-import { generateResumeContent } from '../utils/openrouter.js';
+import { generateSchema, bulletsSchema } from '../utils/schemas.js';
+import { generateResumeContent, generateBullets } from '../utils/openrouter.js';
 import { renderResumeLatex, compileLatexToPdf } from '../utils/latex.js';
 import { scrapeDynamic, scrapeStatic } from '../utils/scrape.js';
 import { canGenerateResume, recordResumeGeneration } from '../utils/supabase.js';
@@ -244,6 +244,27 @@ async function handlePdfRequest(req, res, disposition) {
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+
+/** POST /bullets — Generate or improve bullet points (resume portal) */
+resumeRouter.post('/bullets', async (req, res) => {
+  const parsed = bulletsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const msg = parsed.error.errors?.map((e) => e.message).join('; ') || 'Validation failed';
+    return res.status(400).json({ error: msg });
+  }
+  const { type, context, existingBullets } = parsed.data;
+  try {
+    const { bullets } = await generateBullets({
+      type,
+      context: context || {},
+      existingBullets: existingBullets || [],
+    });
+    return res.json({ bullets });
+  } catch (err) {
+    const status = err.message?.includes('OPENROUTER') ? 503 : err.statusCode || 500;
+    return res.status(status).json({ error: err?.message || 'Bullet generation failed' });
+  }
+});
 
 /** POST /generate — AI content only (JSON, no PDF) */
 resumeRouter.post('/generate', async (req, res) => {

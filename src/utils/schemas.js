@@ -18,9 +18,11 @@ export const generateSchema = z
           z.object({
             title: z.string(),
             company: z.string().optional(),
+            location: z.string().optional(),
             startDate: z.string().optional(),
             endDate: z.string().optional(),
             website: z.string().optional(),
+            technologies: z.array(z.string()).optional().default([]),
             bullets: z.array(z.string()).optional(),
           }),
         )
@@ -65,4 +67,19 @@ export const createCheckoutSchema = z.object({
 
 export const portalSessionSchema = z.object({
   returnUrl: z.string().url().optional(),
+});
+
+// POST /api/resume/bullets — generate or improve bullet points
+export const bulletsSchema = z.object({
+  type: z.enum(['experience', 'project']),
+  context: z
+    .object({
+      title: z.string().optional(),
+      company: z.string().optional(),
+      name: z.string().optional(),
+      skills: z.array(z.string()).optional(),
+    })
+    .optional()
+    .default({}),
+  existingBullets: z.array(z.string()).optional(),
 });
