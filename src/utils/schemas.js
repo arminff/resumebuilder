@@ -69,6 +69,12 @@ export const portalSessionSchema = z.object({
   returnUrl: z.string().url().optional(),
 });
 
+/** POST /subscription/verify-receipt — iOS IAP: receipt + planId */
+export const verifyReceiptSchema = z.object({
+  receipt: z.string().min(1, 'Missing receipt'),
+  planId: z.enum(['basic', 'pro'], { message: 'planId must be basic or pro' }),
+});
+
 // POST /api/resume/bullets — generate or improve bullet points
 export const bulletsSchema = z.object({
   type: z.enum(['experience', 'project']),

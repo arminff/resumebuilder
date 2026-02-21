@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { createCheckoutSchema, portalSessionSchema } from '../utils/schemas.js';
+import { createCheckoutSchema, portalSessionSchema, verifyReceiptSchema } from '../utils/schemas.js';
 import { createCheckoutSession, createPortalSession, SUBSCRIPTION_PLANS } from '../utils/stripe.js';
 import { getUserSubscription, upsertSubscription, deleteSubscription, hasActiveSubscription, getEffectivePlanId, getUsageStats, canGenerateResume } from '../utils/supabase.js';
 import { getStripeSubscription, getCheckoutSession, findSubscriptionByCustomerEmail } from '../utils/stripe.js';
+import { verifyAppleReceipt, planIdMatchesReceipt } from '../utils/apple-iap.js';
 
 const normalizeStripeId = (x) => (x == null ? null : typeof x === 'string' ? x : x?.id ?? null);
 
@@ -16,6 +17,7 @@ async function tryRecoverSubscriptionFromStripe(userId, userEmail) {
   if (findErr || !stripeSub || !customerId) return { recovered: false };
   const subscriptionData = {
     user_id: userId,
+    source: 'stripe',
     stripe_customer_id: customerId,
     stripe_subscription_id: stripeSub.id,
     status: stripeSub.status,
@@ -61,8 +63,9 @@ subscriptionRouter.get('/status', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch subscription status' });
     }
 
-    // If no row in DB, try to recover from Stripe by email (user paid but webhook/from-session missed)
-    if (!subscription?.stripe_subscription_id && userEmail) {
+    // If no row in DB (or Stripe row without subscription id), try to recover from Stripe by email.
+    // Do not overwrite Apple subscriptions: only recover when not an Apple subscription.
+    if (!subscription?.stripe_subscription_id && subscription?.source !== 'apple' && userEmail) {
       const { recovered } = await tryRecoverSubscriptionFromStripe(userId, userEmail);
       if (recovered) {
         const next = await getUserSubscription(userId);
@@ -70,9 +73,9 @@ subscriptionRouter.get('/status', async (req, res) => {
       }
     }
 
-    // Refresh from Stripe when we have a subscription row so Supabase stays in sync (handles stale or delayed webhook)
+    // Refresh from Stripe when we have a Stripe subscription row (not for Apple IAP)
     let subscriptionForResponse = subscription;
-    if (subscription?.stripe_subscription_id) {
+    if (subscription?.stripe_subscription_id && subscription?.source !== 'apple') {
       const { subscription: stripeSub, error: stripeErr } = await getStripeSubscription(subscription.stripe_subscription_id);
       if (!stripeErr && stripeSub) {
         await upsertSubscription({
@@ -124,6 +127,7 @@ subscriptionRouter.get('/status', async (req, res) => {
 
     return res.json({
       subscription: subscriptionForResponse || null,
+      source: subscriptionForResponse?.source ?? 'stripe',
       isActive,
       plan: effectivePlanId,
       limits: plan?.limits || { resumesPerMonth: 10 },
@@ -244,6 +248,7 @@ subscriptionRouter.post('/from-session', async (req, res) => {
     const planId = session.metadata?.planId || 'basic';
     const subscriptionData = {
       user_id: userId,
+      source: 'stripe',
       stripe_customer_id: customerId,
       stripe_subscription_id: subscriptionId,
       status,
@@ -290,12 +295,23 @@ subscriptionRouter.post('/portal', async (req, res) => {
   }
 
   try {
-    // Get user's subscription to find Stripe customer ID
     const { subscription, error: subError } = await getUserSubscription(userId);
-    
-    if (subError || !subscription?.stripe_customer_id) {
-      return res.status(404).json({ 
-        error: 'No active subscription found. Please create a subscription first.' 
+
+    if (subError || !subscription) {
+      return res.status(404).json({
+        error: 'No active subscription found. Please create a subscription first.'
+      });
+    }
+
+    if (subscription.source === 'apple') {
+      return res.status(400).json({
+        error: 'Manage your subscription in iOS: Settings → Apple ID → Subscriptions'
+      });
+    }
+
+    if (!subscription.stripe_customer_id) {
+      return res.status(404).json({
+        error: 'No active subscription found. Please create a subscription first.'
       });
     }
 
@@ -347,6 +363,7 @@ subscriptionRouter.post('/recover', async (req, res) => {
 
     const subscriptionData = {
       user_id: userId,
+      source: 'stripe',
       stripe_customer_id: customerId,
       stripe_subscription_id: stripeSub.id,
       status: stripeSub.status,
@@ -391,9 +408,20 @@ subscriptionRouter.post('/sync', async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch subscription from database' });
     }
 
-    // If no subscription in DB, try recover first
-    if (!dbSubscription || !dbSubscription.stripe_subscription_id) {
-      return res.status(404).json({ 
+    if (!dbSubscription) {
+      return res.status(404).json({
+        error: 'No subscription found. Try POST /api/subscription/recover to recover from Stripe by email.',
+        hasSubscription: false
+      });
+    }
+    if (dbSubscription.source === 'apple') {
+      return res.status(400).json({
+        error: 'Subscription is managed via Apple. Use the app to restore purchases.',
+        hasSubscription: true
+      });
+    }
+    if (!dbSubscription.stripe_subscription_id) {
+      return res.status(404).json({
         error: 'No subscription found. Try POST /api/subscription/recover to recover from Stripe by email.',
         hasSubscription: false
       });
@@ -412,6 +440,7 @@ subscriptionRouter.post('/sync', async (req, res) => {
     // Update database with latest Stripe data
     const subscriptionData = {
       user_id: userId,
+      source: 'stripe',
       stripe_customer_id: dbSubscription.stripe_customer_id,
       stripe_subscription_id: stripeSub.id,
       status: stripeSub.status,
@@ -443,6 +472,62 @@ subscriptionRouter.post('/sync', async (req, res) => {
   } catch (err) {
     console.error('❌ Error syncing subscription:', err);
     return res.status(500).json({ error: err?.message || 'Failed to sync subscription' });
+  }
+});
+
+// iOS In-App Purchase: verify App Store receipt and persist subscription (same status/usage as Stripe)
+subscriptionRouter.post('/verify-receipt', async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'User not authenticated' });
+  }
+
+  const parsed = verifyReceiptSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const first = parsed.error.flatten().fieldErrors;
+    const msg = first.receipt?.[0] ?? first.planId?.[0] ?? 'Invalid request body';
+    return res.status(400).json({ error: msg });
+  }
+
+  const { receipt, planId } = parsed.data;
+
+  try {
+    const result = await verifyAppleReceipt(receipt);
+    if (result.error) {
+      const status = result.error === 'Invalid or expired receipt' ? 402 : 500;
+      return res.status(status).json({ error: result.error });
+    }
+
+    if (!planIdMatchesReceipt(planId, result.productId)) {
+      return res.status(402).json({ error: 'Invalid or expired receipt' });
+    }
+
+    const periodEnd = new Date(result.expiresDateMs);
+    const periodStart = new Date(result.purchaseDateMs ?? result.expiresDateMs - 30 * 24 * 60 * 60 * 1000);
+
+    const subscriptionData = {
+      user_id: userId,
+      source: 'apple',
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      status: 'active',
+      plan_id: planId,
+      current_period_start: periodStart.toISOString(),
+      current_period_end: periodEnd.toISOString(),
+      cancel_at_period_end: false,
+      apple_original_transaction_id: result.originalTransactionId ?? null,
+    };
+
+    const { data, error: upsertError } = await upsertSubscription(subscriptionData);
+    if (upsertError) {
+      console.error('❌ verify-receipt upsert failed:', upsertError);
+      return res.status(500).json({ error: 'Failed to verify purchase' });
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('❌ Error verifying receipt:', err);
+    return res.status(500).json({ error: 'Failed to verify purchase' });
   }
 });
 

@@ -56,28 +56,43 @@ export async function upsertSubscription(subscriptionData) {
     return { data: null, error: new Error('Missing user_id') };
   }
 
-  if (!subscriptionData.stripe_customer_id) {
-    console.error('❌ Missing stripe_customer_id in subscription data');
-    return { data: null, error: new Error('Missing stripe_customer_id') };
+  const source = subscriptionData.source ?? 'stripe';
+  if (source === 'stripe') {
+    if (!subscriptionData.stripe_customer_id) {
+      console.error('❌ Missing stripe_customer_id in subscription data');
+      return { data: null, error: new Error('Missing stripe_customer_id') };
+    }
+    if (!subscriptionData.stripe_subscription_id) {
+      console.error('❌ Missing stripe_subscription_id in subscription data');
+      return { data: null, error: new Error('Missing stripe_subscription_id') };
+    }
   }
-
-  if (!subscriptionData.stripe_subscription_id) {
-    console.error('❌ Missing stripe_subscription_id in subscription data');
-    return { data: null, error: new Error('Missing stripe_subscription_id') };
-  }
+  // When source === 'apple', stripe_customer_id and stripe_subscription_id may be null
 
   console.log('💾 Attempting to upsert subscription:', {
     user_id: subscriptionData.user_id,
     plan_id: subscriptionData.plan_id,
     status: subscriptionData.status,
-    stripe_customer_id: subscriptionData.stripe_customer_id,
-    stripe_subscription_id: subscriptionData.stripe_subscription_id
+    source,
+    stripe_customer_id: subscriptionData.stripe_customer_id ?? null,
+    stripe_subscription_id: subscriptionData.stripe_subscription_id ?? null
   });
 
   try {
+    // Normalize payload: ensure source and optional Apple/Stripe fields are set for DB
+    const payload = {
+      ...subscriptionData,
+      source: subscriptionData.source ?? 'stripe',
+      stripe_customer_id: subscriptionData.stripe_customer_id ?? null,
+      stripe_subscription_id: subscriptionData.stripe_subscription_id ?? null,
+    };
+    if (subscriptionData.apple_original_transaction_id !== undefined) {
+      payload.apple_original_transaction_id = subscriptionData.apple_original_transaction_id;
+    }
+
     const { data, error } = await supabaseAdmin
       .from('subscriptions')
-      .upsert(subscriptionData, {
+      .upsert(payload, {
         onConflict: 'user_id'
       })
       .select()

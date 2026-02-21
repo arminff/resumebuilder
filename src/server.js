@@ -127,6 +127,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
         // Update subscription in database
         const subscriptionData = {
           user_id: userId,
+          source: 'stripe',
           stripe_customer_id: customerId,
           stripe_subscription_id: subscriptionId,
           status: stripeSub.status,
@@ -191,6 +192,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
           // Use the found subscription
           const subscriptionData = {
             user_id: subBySubId.user_id,
+            source: 'stripe',
             stripe_customer_id: customerId,
             stripe_subscription_id: stripeSubscription.id,
             status: event.type === 'customer.subscription.deleted' ? 'canceled' : stripeSubscription.status,
@@ -211,6 +213,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
 
         const subscriptionData = {
           user_id: subscription.user_id,
+          source: 'stripe',
           stripe_customer_id: customerId,
           stripe_subscription_id: stripeSubscription.id,
           status: event.type === 'customer.subscription.deleted' ? 'canceled' : stripeSubscription.status,
@@ -266,6 +269,7 @@ app.post('/api/subscription/webhook', express.raw({ type: 'application/json' }),
 
         const subscriptionData = {
           user_id: subscription.user_id,
+          source: 'stripe',
           stripe_customer_id: customerId,
           stripe_subscription_id: subscriptionId,
           status: stripeSub.status,
